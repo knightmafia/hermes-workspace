@@ -170,6 +170,11 @@ export function OperationsAgentDetail({
     model: string
     emoji: string
     systemPrompt: string
+    allowedWriteScope?: string
+    forbiddenActions?: string
+    escalationConditions?: string
+    outputContract?: string
+    defaultModelLane?: string
   }) => Promise<unknown>
   onDelete: (agentId: string) => Promise<unknown>
   isSaving: boolean
@@ -179,6 +184,11 @@ export function OperationsAgentDetail({
   const [emoji, setEmoji] = useState('🤖')
   const [model, setModel] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [allowedWriteScope, setAllowedWriteScope] = useState('')
+  const [forbiddenActions, setForbiddenActions] = useState('')
+  const [escalationConditions, setEscalationConditions] = useState('')
+  const [outputContract, setOutputContract] = useState('')
+  const [defaultModelLane, setDefaultModelLane] = useState('')
 
   useEffect(() => {
     if (!agent || !open) return
@@ -186,6 +196,11 @@ export function OperationsAgentDetail({
     setEmoji(agent.meta.emoji)
     setModel(agent.model || '')
     setSystemPrompt(agent.meta.systemPrompt)
+    setAllowedWriteScope(agent.allowedWriteScope || '')
+    setForbiddenActions(agent.forbiddenActions || '')
+    setEscalationConditions(agent.escalationConditions || '')
+    setOutputContract(agent.outputContract || '')
+    setDefaultModelLane(agent.defaultModelLane || '')
   }, [agent, open])
 
   const modelsQuery = useQuery({
@@ -276,6 +291,126 @@ export function OperationsAgentDetail({
           />
         </label>
 
+        {agent.scorecard ? (
+          <section className="mt-5 rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg)] p-4">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--theme-muted)]">
+                Scorecard
+              </h3>
+              <p className="mt-2 text-sm text-[var(--theme-muted-2)]">
+                Derived from durable mission, task, and review history in the agency vault.
+              </p>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Assigned</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--theme-text)]">{agent.scorecard.assignedTasks}</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Completed</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--theme-text)]">{agent.scorecard.completedTasks}</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Review Passes</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--theme-text)]">{agent.scorecard.reviewPasses}</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Auto-Requeues</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--theme-text)]">{agent.scorecard.requeueCount}</div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Active</div>
+                <div className="mt-1 text-base font-semibold text-[var(--theme-text)]">{agent.scorecard.activeTasks}</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Followups</div>
+                <div className="mt-1 text-base font-semibold text-[var(--theme-text)]">{agent.scorecard.reviewFollowups + agent.scorecard.failedTasks}</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-[var(--theme-muted)]">Avg Cycle</div>
+                <div className="mt-1 text-base font-semibold text-[var(--theme-text)]">
+                  {agent.scorecard.averageCycleHours > 0 ? `${agent.scorecard.averageCycleHours}h` : '—'}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="mt-5 rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-bg)] p-4">
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--theme-muted)]">
+              Agent Contract
+            </h3>
+            <p className="mt-2 text-sm text-[var(--theme-muted-2)]">
+              Define what this agent can touch, what it must not do, how it should escalate, and the output shape it owes the manager.
+            </p>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--theme-text)]">
+                Default Model Lane
+              </span>
+              <input
+                value={defaultModelLane}
+                onChange={(event) => setDefaultModelLane(event.target.value)}
+                placeholder="cheap-local, strong-coder, review"
+                className="w-full rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3 text-sm text-[var(--theme-text)] outline-none focus:border-[var(--theme-accent)]"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--theme-text)]">
+                Allowed Write Scope
+              </span>
+              <textarea
+                value={allowedWriteScope}
+                onChange={(event) => setAllowedWriteScope(event.target.value)}
+                placeholder="Files, folders, queues, artifacts this agent may update."
+                className="min-h-[120px] w-full rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3 text-sm text-[var(--theme-text)] outline-none focus:border-[var(--theme-accent)]"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--theme-text)]">
+                Forbidden Actions
+              </span>
+              <textarea
+                value={forbiddenActions}
+                onChange={(event) => setForbiddenActions(event.target.value)}
+                placeholder="Actions this agent must never take without handoff."
+                className="min-h-[120px] w-full rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3 text-sm text-[var(--theme-text)] outline-none focus:border-[var(--theme-accent)]"
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--theme-text)]">
+                Escalation Conditions
+              </span>
+              <textarea
+                value={escalationConditions}
+                onChange={(event) => setEscalationConditions(event.target.value)}
+                placeholder="When this agent must escalate to manager or QA."
+                className="min-h-[120px] w-full rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3 text-sm text-[var(--theme-text)] outline-none focus:border-[var(--theme-accent)]"
+              />
+            </label>
+          </div>
+
+          <label className="mt-4 block space-y-2">
+            <span className="text-sm font-medium text-[var(--theme-text)]">
+              Output Contract
+            </span>
+            <textarea
+              value={outputContract}
+              onChange={(event) => setOutputContract(event.target.value)}
+              placeholder="Required summary, artifacts, checklist, and handoff format."
+              className="min-h-[150px] w-full rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3 text-sm text-[var(--theme-text)] outline-none focus:border-[var(--theme-accent)]"
+            />
+          </label>
+        </section>
+
         <div className="mt-6 flex flex-col gap-3 border-t border-[var(--theme-border)] pt-4 sm:flex-row sm:items-center sm:justify-between">
           <Button
             variant="ghost"
@@ -304,6 +439,11 @@ export function OperationsAgentDetail({
                   model,
                   emoji,
                   systemPrompt,
+                  allowedWriteScope,
+                  forbiddenActions,
+                  escalationConditions,
+                  outputContract,
+                  defaultModelLane,
                 })
               }
               disabled={isSaving || isDeleting}

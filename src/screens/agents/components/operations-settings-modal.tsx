@@ -168,7 +168,7 @@ export function OperationsSettingsModal({
                 Operations Settings
               </h2>
               <p className="mt-1 text-sm text-[var(--theme-muted-2)]">
-                Defaults stored locally for the Operations screen.
+                Defaults stored in the Waymaker agency folder so Operations and Conductor share them.
               </p>
             </div>
           </div>

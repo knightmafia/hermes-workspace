@@ -1,9 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CronJob } from '@/components/cron-manager/cron-types'
 import { toast } from '@/components/ui/toast'
 import { fetchCronJobs } from '@/lib/cron-api'
 import { fetchSessions, type GatewaySession } from '@/lib/gateway-api'
+import {
+  deleteAgencyAgentRecord,
+  fetchAgencyState,
+  saveAgencyAgent,
+  saveAgencySettings as saveAgencySettingsRequest,
+  type AgencyAgentScorecard,
+} from '@/lib/waymaker-agency-api'
 import { formatModelName, formatRelativeTime } from '@/screens/dashboard/lib/formatters'
 
 // Hermes-Workspace adapter: Operations is backed by Hermes profiles
@@ -42,6 +49,7 @@ export type OperationsSettings = {
   defaultModel: string
   autoApprove: boolean
   activityFeedLength: number
+  orchestratorName: string
 }
 
 export type OperationsAgentStatus = 'active' | 'idle' | 'error'
@@ -56,6 +64,11 @@ export type OperationsOutputItem = {
 
 export type OperationsAgent = GatewayConfigAgent & {
   meta: OperationsAgentMeta
+  allowedWriteScope?: string
+  forbiddenActions?: string
+  escalationConditions?: string
+  outputContract?: string
+  defaultModelLane?: string
   shortModel: string
   status: OperationsAgentStatus
   sessionKey: string
@@ -68,6 +81,7 @@ export type OperationsAgent = GatewayConfigAgent & {
   progressValue: number
   progressStatus: 'running' | 'queued' | 'failed' | 'complete' | 'thinking'
   recentOutputs: OperationsOutputItem[]
+  scorecard?: AgencyAgentScorecard | null
 }
 
 type ConfigPayload = {
@@ -95,9 +109,6 @@ type ConfigPayload = {
   [key: string]: unknown
 }
 
-const META_STORAGE_PREFIX = 'operations:agents:'
-const SETTINGS_STORAGE_KEY = 'operations-settings'
-
 const COLOR_PALETTE = [
   { body: '#3b82f6', accent: '#93c5fd' },
   { body: '#10b981', accent: '#6ee7b7' },
@@ -108,6 +119,12 @@ const COLOR_PALETTE = [
   { body: '#eab308', accent: '#fde047' },
   { body: '#ef4444', accent: '#fca5a5' },
 ]
+
+const AGENCY_ROLE_IDS = ['manager', 'research', 'builder', 'qa', 'ops', 'outreach'] as const
+
+function isAgencyRole(value: string): boolean {
+  return AGENCY_ROLE_IDS.includes(value as (typeof AGENCY_ROLE_IDS)[number])
+}
 
 function hashString(value: string): number {
   let hash = 0
@@ -300,95 +317,6 @@ async function deleteHermesProfile(name: string) {
   }
 }
 
-function loadAgentMeta(agentId: string): OperationsAgentMeta {
-  if (typeof window === 'undefined') {
-    return {
-      emoji: createFallbackEmoji(agentId),
-      description: '',
-      systemPrompt: '',
-      color: createFallbackColor(agentId),
-      createdAt: new Date().toISOString(),
-    }
-  }
-
-  try {
-    const raw = window.localStorage.getItem(`${META_STORAGE_PREFIX}${agentId}`)
-    if (!raw) {
-      return {
-        emoji: createFallbackEmoji(agentId),
-        description: '',
-        systemPrompt: '',
-        color: createFallbackColor(agentId),
-        createdAt: new Date().toISOString(),
-      }
-    }
-
-    const parsed = JSON.parse(raw) as Partial<OperationsAgentMeta>
-    return {
-      emoji: readString(parsed.emoji) || createFallbackEmoji(agentId),
-      description: readString(parsed.description),
-      systemPrompt: readString(parsed.systemPrompt),
-      color: readString(parsed.color) || createFallbackColor(agentId),
-      createdAt: readString(parsed.createdAt) || new Date().toISOString(),
-    }
-  } catch {
-    return {
-      emoji: createFallbackEmoji(agentId),
-      description: '',
-      systemPrompt: '',
-      color: createFallbackColor(agentId),
-      createdAt: new Date().toISOString(),
-    }
-  }
-}
-
-function persistAgentMeta(agentId: string, meta: OperationsAgentMeta) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(
-    `${META_STORAGE_PREFIX}${agentId}`,
-    JSON.stringify(meta),
-  )
-}
-
-function removeAgentMeta(agentId: string) {
-  if (typeof window === 'undefined') return
-  window.localStorage.removeItem(`${META_STORAGE_PREFIX}${agentId}`)
-}
-
-function loadSettings(): OperationsSettings {
-  if (typeof window === 'undefined') {
-    return { defaultModel: '', autoApprove: false, activityFeedLength: 5 }
-  }
-
-  try {
-    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-    if (!raw) {
-      return { defaultModel: '', autoApprove: false, activityFeedLength: 5 }
-    }
-
-    const parsed = JSON.parse(raw) as Partial<OperationsSettings>
-    const activityFeedLength = Number(parsed.activityFeedLength)
-
-    return {
-      defaultModel: readString(parsed.defaultModel),
-      autoApprove: Boolean(parsed.autoApprove),
-      activityFeedLength:
-        Number.isFinite(activityFeedLength) && activityFeedLength > 0
-          ? Math.min(20, Math.max(1, Math.round(activityFeedLength)))
-          : 5,
-    }
-  } catch {
-    return { defaultModel: '', autoApprove: false, activityFeedLength: 5 }
-  }
-}
-
-function persistSettings(settings: OperationsSettings) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
-}
-
-
-
 function getAgentJobs(agentId: string, jobs: CronJob[]): CronJob[] {
   return jobs.filter((job) => job.name?.startsWith(`ops:${agentId}:`))
 }
@@ -508,8 +436,12 @@ export function getOperationsSessionKey(agentId: string): string {
 export function useOperations() {
   const queryClient = useQueryClient()
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  const [settings, setSettings] = useState<OperationsSettings>(() => loadSettings())
-  const [metaVersion, setMetaVersion] = useState(0)
+  const [settings, setSettings] = useState<OperationsSettings>({
+    defaultModel: '',
+    autoApprove: false,
+    activityFeedLength: 5,
+    orchestratorName: 'Main Agent',
+  })
 
   const configQuery = useQuery({
     queryKey: ['operations', 'config'],
@@ -532,17 +464,74 @@ export function useOperations() {
     refetchInterval: 30_000,
   })
 
+  const agencyQuery = useQuery({
+    queryKey: ['operations', 'agency'],
+    queryFn: fetchAgencyState,
+    refetchInterval: 30_000,
+  })
+
+  const agencyAgents = (agencyQuery.data?.agents ?? []).filter((agent) => isAgencyRole(normalizeAgentId(agent.id)))
+  const agencyAgentsById = useMemo(
+    () => new Map(agencyAgents.map((agent) => [normalizeAgentId(agent.id), agent])),
+    [agencyAgents],
+  )
+  const agencyScorecardsById = useMemo(
+    () => new Map((agencyQuery.data?.scorecards ?? []).map((scorecard) => [normalizeAgentId(scorecard.agentId), scorecard])),
+    [agencyQuery.data?.scorecards],
+  )
+
+  const effectiveSettings = agencyQuery.data?.settings ?? settings
+  useEffect(() => {
+    if (!agencyQuery.data?.settings) return
+    const next = agencyQuery.data.settings
+    setSettings((current) => {
+      if (
+        current.defaultModel === next.defaultModel &&
+        current.autoApprove === next.autoApprove &&
+        current.activityFeedLength === next.activityFeedLength &&
+        current.orchestratorName === next.orchestratorName
+      ) {
+        return current
+      }
+      return next
+    })
+  }, [agencyQuery.data?.settings])
+
   const agents = useMemo(() => {
     const parsed = configQuery.data?.parsed
-    const allAgents = normalizeAgentList(parsed?.agents?.list)
+    const profileAgents = normalizeAgentList(parsed?.agents?.list)
     // Filter out system/internal agents — only show operations agents
     const HIDDEN_AGENTS = new Set(['main', 'pc1-coder', 'pc1-planner', 'pc1-critic'])
-    const configAgents = allAgents.filter((a) => !HIDDEN_AGENTS.has(a.id))
+    const configAgents = profileAgents.filter((a) => !HIDDEN_AGENTS.has(a.id) && isAgencyRole(a.id))
+    const runtimeBackedIds = new Set(configAgents.map((agent) => agent.id))
+    const mergedAgents = [...configAgents]
+
+    for (const agencyAgent of agencyAgents) {
+      const id = normalizeAgentId(agencyAgent.id)
+      if (!id || runtimeBackedIds.has(id) || HIDDEN_AGENTS.has(id) || !isAgencyRole(id)) continue
+      mergedAgents.push({
+        id,
+        name: agencyAgent.name,
+        model: agencyAgent.model,
+        workspace: agencyAgent.path,
+        agentDir: agencyAgent.path,
+      })
+    }
+
     const sessions = sessionsQuery.data ?? []
     const cronJobs = cronJobsQuery.data ?? []
 
-    return configAgents.map((agent) => {
-      const meta = loadAgentMeta(agent.id)
+    return mergedAgents.map((agent) => {
+      const agencyMeta = agencyAgentsById.get(agent.id)
+      const runtimeReady = runtimeBackedIds.has(agent.id)
+      const scorecard = agencyScorecardsById.get(agent.id) ?? null
+      const meta = {
+        emoji: readString(agencyMeta?.emoji) || createFallbackEmoji(agent.id),
+        description: readString(agencyMeta?.description),
+        systemPrompt: readString(agencyMeta?.systemPrompt),
+        color: createFallbackColor(agent.id),
+        createdAt: '',
+      } satisfies OperationsAgentMeta
       const agentSessions = getAgentSessions(agent.id, sessions)
       const latestSession = agentSessions[0] ?? null
       const jobs = getAgentJobs(agent.id, cronJobs)
@@ -569,10 +558,19 @@ export function useOperations() {
 
       return {
         ...agent,
+        name: readString(agencyMeta?.name) || agent.name,
+        model: readString(agencyMeta?.model) || agent.model,
+        workspace: readString(agencyMeta?.path) || agent.workspace,
+        agentDir: readString(agencyMeta?.path) || agent.agentDir,
         meta,
-        shortModel: formatModelName(agent.model || 'Custom'),
+        allowedWriteScope: readString(agencyMeta?.allowedWriteScope),
+        forbiddenActions: readString(agencyMeta?.forbiddenActions),
+        escalationConditions: readString(agencyMeta?.escalationConditions),
+        outputContract: readString(agencyMeta?.outputContract),
+        defaultModelLane: readString(agencyMeta?.defaultModelLane),
+        shortModel: formatModelName(readString(agencyMeta?.model) || agent.model || 'Custom'),
         status,
-        sessionKey: getOperationsSessionKey(agent.id),
+        sessionKey: runtimeReady ? getOperationsSessionKey(agent.id) : '',
         sessions: agentSessions,
         latestSession,
         jobs,
@@ -582,17 +580,22 @@ export function useOperations() {
           ? `Next ${formatUpcomingTime(nextRunAt)}`
           : lastActivityAt
             ? `Last ${formatRelativeTime(lastActivityAt)}`
-            : 'No activity yet',
+            : runtimeReady
+              ? 'No activity yet'
+              : 'Agency record only',
         progressValue: getProgressValue(status, latestSession),
         progressStatus: getProgressStatus(status, latestSession),
         recentOutputs,
+        scorecard,
       } satisfies OperationsAgent
-    })
+    }).sort((left, right) => AGENCY_ROLE_IDS.indexOf(left.id as (typeof AGENCY_ROLE_IDS)[number]) - AGENCY_ROLE_IDS.indexOf(right.id as (typeof AGENCY_ROLE_IDS)[number]))
   }, [
     configQuery.data,
+    agencyAgents,
+    agencyAgentsById,
+    agencyScorecardsById,
     sessionsQuery.data,
     cronJobsQuery.data,
-    metaVersion,
   ])
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null
@@ -617,6 +620,9 @@ export function useOperations() {
       if (id === 'default') {
         throw new Error('"default" is reserved — pick another name')
       }
+      if (!isAgencyRole(id)) {
+        throw new Error('Gate 5 allows only manager, research, builder, qa, ops, and outreach')
+      }
       const currentAgents = normalizeAgentList(configQuery.data?.parsed?.agents?.list)
       if (currentAgents.some((agent) => agent.id === id)) {
         throw new Error('A profile with this name already exists')
@@ -634,18 +640,20 @@ export function useOperations() {
           description: input.description?.trim() || undefined,
         })
       }
-      persistAgentMeta(id, {
+      await saveAgencyAgent({
+        id,
+        name: input.name.trim() || id,
+        profile: id,
         emoji: input.emoji.trim() || createFallbackEmoji(id),
+        model: input.model.trim(),
         description: input.description?.trim() ?? '',
         systemPrompt: input.systemPrompt.trim(),
-        color: createFallbackColor(id),
-        createdAt: new Date().toISOString(),
       })
-      setMetaVersion((value) => value + 1)
       setSelectedAgentId(id)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['operations', 'config'] })
+      await queryClient.invalidateQueries({ queryKey: ['operations', 'agency'] })
       toast('Agent created', { type: 'success' })
     },
     onError: (error) => {
@@ -662,25 +670,47 @@ export function useOperations() {
       model: string
       emoji: string
       systemPrompt: string
+      allowedWriteScope?: string
+      forbiddenActions?: string
+      escalationConditions?: string
+      outputContract?: string
+      defaultModelLane?: string
     }) => {
       // Persist model + system prompt to the profile's config.yaml so they
       // survive across machines / clients.
+      const currentAgents = normalizeAgentList(configQuery.data?.parsed?.agents?.list)
+      const profileExists = currentAgents.some((agent) => agent.id === input.agentId)
       const patch: Record<string, unknown> = {}
       if (input.model.trim()) patch.model = input.model.trim()
       if (input.systemPrompt.trim()) patch.system_prompt = input.systemPrompt.trim()
+      if (!profileExists) {
+        await createHermesProfile({
+          name: input.agentId,
+          model: input.model.trim() || undefined,
+        })
+      }
       if (Object.keys(patch).length > 0) {
         await updateHermesProfile(input.agentId, patch)
       }
-      const currentMeta = loadAgentMeta(input.agentId)
-      persistAgentMeta(input.agentId, {
-        ...currentMeta,
-        emoji: input.emoji.trim() || currentMeta.emoji,
+      const currentAgency = agencyAgentsById.get(input.agentId)
+      await saveAgencyAgent({
+        id: input.agentId,
+        name: input.name.trim() || currentAgency?.name || input.agentId,
+        profile: currentAgency?.profile || input.agentId,
+        emoji: input.emoji.trim() || currentAgency?.emoji || createFallbackEmoji(input.agentId),
+        model: input.model.trim(),
+        description: currentAgency?.description || '',
         systemPrompt: input.systemPrompt.trim(),
+        allowedWriteScope: input.allowedWriteScope?.trim() || '',
+        forbiddenActions: input.forbiddenActions?.trim() || '',
+        escalationConditions: input.escalationConditions?.trim() || '',
+        outputContract: input.outputContract?.trim() || '',
+        defaultModelLane: input.defaultModelLane?.trim() || '',
       })
-      setMetaVersion((value) => value + 1)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['operations', 'config'] })
+      await queryClient.invalidateQueries({ queryKey: ['operations', 'agency'] })
       toast('Agent settings saved', { type: 'success' })
     },
     onError: (error) => {
@@ -695,14 +725,17 @@ export function useOperations() {
       if (agentId === 'default') {
         throw new Error('Cannot delete the default profile')
       }
-      await deleteHermesProfile(agentId)
-      removeAgentMeta(agentId)
-      setMetaVersion((value) => value + 1)
+      const currentAgents = normalizeAgentList(configQuery.data?.parsed?.agents?.list)
+      if (currentAgents.some((agent) => agent.id === agentId)) {
+        await deleteHermesProfile(agentId)
+      }
+      await deleteAgencyAgentRecord(agentId)
       setSelectedAgentId((current) => (current === agentId ? null : current))
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['operations', 'config'] })
       await queryClient.invalidateQueries({ queryKey: ['operations', 'sessions'] })
+      await queryClient.invalidateQueries({ queryKey: ['operations', 'agency'] })
       toast('Agent deleted', { type: 'success' })
     },
     onError: (error) => {
@@ -713,14 +746,29 @@ export function useOperations() {
   })
 
   function saveAgentMeta(agentId: string, partial: Partial<OperationsAgentMeta>) {
-    const nextMeta = { ...loadAgentMeta(agentId), ...partial }
-    persistAgentMeta(agentId, nextMeta)
-    setMetaVersion((value) => value + 1)
+    const currentAgency = agencyAgentsById.get(agentId)
+    if (!currentAgency) return
+    void saveAgencyAgent({
+      id: agentId,
+      name: currentAgency.name,
+      profile: currentAgency.profile,
+      emoji: readString(partial.emoji) || currentAgency.emoji || createFallbackEmoji(agentId),
+      model: currentAgency.model,
+      description: readString(partial.description) || currentAgency.description,
+      systemPrompt: readString(partial.systemPrompt) || currentAgency.systemPrompt,
+      allowedWriteScope: currentAgency.allowedWriteScope,
+      forbiddenActions: currentAgency.forbiddenActions,
+      escalationConditions: currentAgency.escalationConditions,
+      outputContract: currentAgency.outputContract,
+      defaultModelLane: currentAgency.defaultModelLane,
+    }).then(() => queryClient.invalidateQueries({ queryKey: ['operations', 'agency'] }))
   }
 
   function saveSettings(nextSettings: OperationsSettings) {
     setSettings(nextSettings)
-    persistSettings(nextSettings)
+    void saveAgencySettingsRequest(nextSettings).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ['operations', 'agency'] })
+    })
     toast('Operations settings saved', { type: 'success' })
   }
 
@@ -730,13 +778,14 @@ export function useOperations() {
     selectedAgentId,
     setSelectedAgent: setSelectedAgentId,
     configQuery,
+    agencyQuery,
     sessionsQuery,
     cronJobsQuery,
     recentActivity,
     settings,
     saveSettings,
     defaultModel:
-      readString(configQuery.data?.parsed?.defaultModel) || settings.defaultModel,
+      readString(configQuery.data?.parsed?.defaultModel) || effectiveSettings.defaultModel,
     createAgent: createAgentMutation.mutateAsync,
     isCreatingAgent: createAgentMutation.isPending,
     saveAgent: saveAgentMutation.mutateAsync,

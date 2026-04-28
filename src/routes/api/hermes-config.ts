@@ -98,6 +98,58 @@ function writeConfig(config: Record<string, unknown>): void {
   fs.writeFileSync(CONFIG_PATH, YAML.stringify(config), 'utf-8')
 }
 
+function normalizeModelPatch(
+  current: Record<string, unknown>,
+  updates: Record<string, unknown>,
+): void {
+  const hasFlatModel =
+    typeof updates.model === 'string' ||
+    Object.prototype.hasOwnProperty.call(updates, 'provider') ||
+    Object.prototype.hasOwnProperty.call(updates, 'base_url')
+
+  if (!hasFlatModel) return
+
+  const currentModel =
+    current.model && typeof current.model === 'object' && !Array.isArray(current.model)
+      ? { ...(current.model as Record<string, unknown>) }
+      : {}
+
+  const nextModel: Record<string, unknown> = { ...currentModel }
+
+  if (typeof updates.model === 'string') {
+    nextModel.default = updates.model
+  } else if (
+    updates.model &&
+    typeof updates.model === 'object' &&
+    !Array.isArray(updates.model)
+  ) {
+    Object.assign(nextModel, updates.model as Record<string, unknown>)
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'provider')) {
+    if (updates.provider === null || updates.provider === '') {
+      delete nextModel.provider
+    } else {
+      nextModel.provider = updates.provider
+    }
+    delete updates.provider
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'base_url')) {
+    if (updates.base_url === null || updates.base_url === '') {
+      delete nextModel.base_url
+    } else {
+      nextModel.base_url = updates.base_url
+    }
+    delete updates.base_url
+  }
+
+  updates.model = nextModel
+
+  // Prefer the nested Hermes model block as the single source of truth.
+  delete current.provider
+}
+
 function readEnv(): Record<string, string> {
   try {
     const raw = fs.readFileSync(ENV_PATH, 'utf-8')
@@ -141,6 +193,37 @@ function checkAuthStore(providerId: string): {
   source: string
   maskedKey?: string
 } {
+  try {
+    const authJsonPath = path.join(HERMES_HOME, 'auth.json')
+    if (fs.existsSync(authJsonPath)) {
+      const authData = JSON.parse(fs.readFileSync(authJsonPath, 'utf-8')) as Record<
+        string,
+        unknown
+      >
+      const credentialPool =
+        authData.credential_pool &&
+        typeof authData.credential_pool === 'object' &&
+        !Array.isArray(authData.credential_pool)
+          ? (authData.credential_pool as Record<string, unknown>)
+          : {}
+      const entries = Array.isArray(credentialPool[providerId])
+        ? (credentialPool[providerId] as Array<Record<string, unknown>>)
+        : []
+      for (const entry of entries) {
+        const token = String(
+          entry.access_token || entry.refresh_token || entry.api_key || '',
+        ).trim()
+        if (token) {
+          return {
+            hasToken: true,
+            source: 'auth-json',
+            maskedKey: maskKey(token),
+          }
+        }
+      }
+    }
+  } catch {}
+
   // Check Hermes auth store
   const storePath = path.join(os.homedir(), '.hermes', 'auth-profiles.json')
   try {
@@ -254,6 +337,8 @@ export const Route = createFileRoute('/api/hermes-config')({
         if (body.config && typeof body.config === 'object') {
           const current = readConfig()
           const updates = body.config as Record<string, unknown>
+
+          normalizeModelPatch(current, updates)
 
           // Deep merge
           function deepMerge(

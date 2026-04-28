@@ -70,12 +70,14 @@ export function OperationsInlineChat({
   sendMessage,
   isSending,
   error,
+  disabled = false,
 }: {
   agentName: string
   messages: OperationsChatMessage[]
   sendMessage: (message: string) => Promise<unknown>
   isSending: boolean
   error: string | null
+  disabled?: boolean
 }) {
   const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -89,7 +91,7 @@ export function OperationsInlineChat({
 
   async function handleSend() {
     const message = draft.trim()
-    if (!message || isSending) return
+    if (!message || isSending || disabled) return
     await sendMessage(message)
     setDraft('')
   }
@@ -136,7 +138,11 @@ export function OperationsInlineChat({
       </div>
 
       <div className="border-t border-[var(--theme-border)] px-3 py-3">
-        {error ? <p className="mb-2 text-xs text-red-600">{error}</p> : null}
+        {disabled ? (
+          <p className="mb-2 text-xs text-[var(--theme-muted)]">
+            This agent exists in the agency folder but does not have a live Hermes profile/session yet.
+          </p>
+        ) : error ? <p className="mb-2 text-xs text-red-600">{error}</p> : null}
         <div className="flex items-center gap-2 rounded-[1rem] border border-[var(--theme-border)] bg-[var(--theme-bg)] p-2">
           <input
             type="text"
@@ -148,14 +154,19 @@ export function OperationsInlineChat({
                 void handleSend()
               }
             }}
-            placeholder={`Message ${stripEmojiPrefix(agentName)}...`}
+            placeholder={
+              disabled
+                ? `${stripEmojiPrefix(agentName)} is not wired to Hermes yet`
+                : `Message ${stripEmojiPrefix(agentName)}...`
+            }
+            disabled={disabled}
             className="h-8 flex-1 bg-transparent px-1.5 text-xs text-[var(--theme-text)] outline-none placeholder:text-[var(--theme-muted)]"
           />
           <Button
             size="icon-sm"
             className="rounded-lg bg-[var(--theme-accent)] text-primary-950 hover:bg-[var(--theme-accent-strong)]"
             onClick={() => void handleSend()}
-            disabled={!draft.trim() || isSending}
+            disabled={disabled || !draft.trim() || isSending}
             aria-label={isSending ? 'Sending message' : 'Send message'}
           >
             <HugeiconsIcon icon={ArrowRight01Icon} size={15} strokeWidth={1.8} />
@@ -322,6 +333,28 @@ export function OperationsAgentCard({
         <p className="w-full truncate text-[10px] text-[var(--theme-muted)]/80">
           {agent.jobs.length > 0 ? `${agent.jobs.length} scheduled job${agent.jobs.length === 1 ? '' : 's'}` : 'Manual only'}
         </p>
+        {agent.scorecard ? (
+          <div className="mt-2 grid w-full grid-cols-3 gap-1 text-left">
+            <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-2 py-1.5">
+              <div className="text-[9px] uppercase tracking-[0.12em] text-[var(--theme-muted)]">Done</div>
+              <div className="mt-1 text-xs font-semibold text-[var(--theme-text)]">
+                {agent.scorecard.completedTasks}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-2 py-1.5">
+              <div className="text-[9px] uppercase tracking-[0.12em] text-[var(--theme-muted)]">Review</div>
+              <div className="mt-1 text-xs font-semibold text-[var(--theme-text)]">
+                {agent.scorecard.reviewPasses}/{agent.scorecard.reviewPasses + agent.scorecard.reviewFollowups}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-2 py-1.5">
+              <div className="text-[9px] uppercase tracking-[0.12em] text-[var(--theme-muted)]">Requeue</div>
+              <div className="mt-1 text-xs font-semibold text-[var(--theme-text)]">
+                {agent.scorecard.requeueCount}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <AnimatePresence initial={false}>
@@ -409,13 +442,14 @@ export function OperationsAgentCard({
       </AnimatePresence>
 
       <div className="min-h-0 flex-1">
-        <OperationsInlineChat
-          agentName={agent.name}
-          messages={messages}
-          sendMessage={sendMessage}
-          isSending={isSending}
-          error={error}
-        />
+          <OperationsInlineChat
+            agentName={agent.name}
+            messages={messages}
+            sendMessage={sendMessage}
+            isSending={isSending}
+            error={error}
+            disabled={!agent.sessionKey}
+          />
       </div>
     </article>
   )

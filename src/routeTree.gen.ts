@@ -65,6 +65,15 @@ import { Route as ApiConductorSpawnRouteImport } from './routes/api/conductor-sp
 import { Route as ApiChatEventsRouteImport } from './routes/api/chat-events'
 import { Route as ApiAuthCheckRouteImport } from './routes/api/auth-check'
 import { Route as ApiAuthRouteImport } from './routes/api/auth'
+import { Route as ApiAgencyTaskActionRouteImport } from './routes/api/agency-task-action'
+import { Route as ApiAgencyStateRouteImport } from './routes/api/agency-state'
+import { Route as ApiAgencySettingsRouteImport } from './routes/api/agency-settings'
+import { Route as ApiAgencyMissionUpdateRouteImport } from './routes/api/agency-mission-update'
+import { Route as ApiAgencyMissionCreateRouteImport } from './routes/api/agency-mission-create'
+import { Route as ApiAgencyHeartbeatsRouteImport } from './routes/api/agency-heartbeats'
+import { Route as ApiAgencyFileRouteImport } from './routes/api/agency-file'
+import { Route as ApiAgencyAgentUpsertRouteImport } from './routes/api/agency-agent-upsert'
+import { Route as ApiAgencyAgentDeleteRouteImport } from './routes/api/agency-agent-delete'
 import { Route as ApiSkillsUninstallRouteImport } from './routes/api/skills/uninstall'
 import { Route as ApiSkillsToggleRouteImport } from './routes/api/skills/toggle'
 import { Route as ApiSkillsInstallRouteImport } from './routes/api/skills/install'
@@ -378,6 +387,51 @@ const ApiAuthRoute = ApiAuthRouteImport.update({
   path: '/api/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAgencyTaskActionRoute = ApiAgencyTaskActionRouteImport.update({
+  id: '/api/agency-task-action',
+  path: '/api/agency-task-action',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyStateRoute = ApiAgencyStateRouteImport.update({
+  id: '/api/agency-state',
+  path: '/api/agency-state',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencySettingsRoute = ApiAgencySettingsRouteImport.update({
+  id: '/api/agency-settings',
+  path: '/api/agency-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyMissionUpdateRoute = ApiAgencyMissionUpdateRouteImport.update({
+  id: '/api/agency-mission-update',
+  path: '/api/agency-mission-update',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyMissionCreateRoute = ApiAgencyMissionCreateRouteImport.update({
+  id: '/api/agency-mission-create',
+  path: '/api/agency-mission-create',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyHeartbeatsRoute = ApiAgencyHeartbeatsRouteImport.update({
+  id: '/api/agency-heartbeats',
+  path: '/api/agency-heartbeats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyFileRoute = ApiAgencyFileRouteImport.update({
+  id: '/api/agency-file',
+  path: '/api/agency-file',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyAgentUpsertRoute = ApiAgencyAgentUpsertRouteImport.update({
+  id: '/api/agency-agent-upsert',
+  path: '/api/agency-agent-upsert',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAgencyAgentDeleteRoute = ApiAgencyAgentDeleteRouteImport.update({
+  id: '/api/agency-agent-delete',
+  path: '/api/agency-agent-delete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSkillsUninstallRoute = ApiSkillsUninstallRouteImport.update({
   id: '/uninstall',
   path: '/uninstall',
@@ -556,6 +610,15 @@ export interface FileRoutesByFullPath {
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/terminal': typeof TerminalRoute
+  '/api/agency-agent-delete': typeof ApiAgencyAgentDeleteRoute
+  '/api/agency-agent-upsert': typeof ApiAgencyAgentUpsertRoute
+  '/api/agency-file': typeof ApiAgencyFileRoute
+  '/api/agency-heartbeats': typeof ApiAgencyHeartbeatsRoute
+  '/api/agency-mission-create': typeof ApiAgencyMissionCreateRoute
+  '/api/agency-mission-update': typeof ApiAgencyMissionUpdateRoute
+  '/api/agency-settings': typeof ApiAgencySettingsRoute
+  '/api/agency-state': typeof ApiAgencyStateRoute
+  '/api/agency-task-action': typeof ApiAgencyTaskActionRoute
   '/api/auth': typeof ApiAuthRoute
   '/api/auth-check': typeof ApiAuthCheckRoute
   '/api/chat-events': typeof ApiChatEventsRoute
@@ -645,6 +708,15 @@ export interface FileRoutesByTo {
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/terminal': typeof TerminalRoute
+  '/api/agency-agent-delete': typeof ApiAgencyAgentDeleteRoute
+  '/api/agency-agent-upsert': typeof ApiAgencyAgentUpsertRoute
+  '/api/agency-file': typeof ApiAgencyFileRoute
+  '/api/agency-heartbeats': typeof ApiAgencyHeartbeatsRoute
+  '/api/agency-mission-create': typeof ApiAgencyMissionCreateRoute
+  '/api/agency-mission-update': typeof ApiAgencyMissionUpdateRoute
+  '/api/agency-settings': typeof ApiAgencySettingsRoute
+  '/api/agency-state': typeof ApiAgencyStateRoute
+  '/api/agency-task-action': typeof ApiAgencyTaskActionRoute
   '/api/auth': typeof ApiAuthRoute
   '/api/auth-check': typeof ApiAuthCheckRoute
   '/api/chat-events': typeof ApiChatEventsRoute
@@ -736,6 +808,15 @@ export interface FileRoutesById {
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/terminal': typeof TerminalRoute
+  '/api/agency-agent-delete': typeof ApiAgencyAgentDeleteRoute
+  '/api/agency-agent-upsert': typeof ApiAgencyAgentUpsertRoute
+  '/api/agency-file': typeof ApiAgencyFileRoute
+  '/api/agency-heartbeats': typeof ApiAgencyHeartbeatsRoute
+  '/api/agency-mission-create': typeof ApiAgencyMissionCreateRoute
+  '/api/agency-mission-update': typeof ApiAgencyMissionUpdateRoute
+  '/api/agency-settings': typeof ApiAgencySettingsRoute
+  '/api/agency-state': typeof ApiAgencyStateRoute
+  '/api/agency-task-action': typeof ApiAgencyTaskActionRoute
   '/api/auth': typeof ApiAuthRoute
   '/api/auth-check': typeof ApiAuthCheckRoute
   '/api/chat-events': typeof ApiChatEventsRoute
@@ -828,6 +909,15 @@ export interface FileRouteTypes {
     | '/skills'
     | '/tasks'
     | '/terminal'
+    | '/api/agency-agent-delete'
+    | '/api/agency-agent-upsert'
+    | '/api/agency-file'
+    | '/api/agency-heartbeats'
+    | '/api/agency-mission-create'
+    | '/api/agency-mission-update'
+    | '/api/agency-settings'
+    | '/api/agency-state'
+    | '/api/agency-task-action'
     | '/api/auth'
     | '/api/auth-check'
     | '/api/chat-events'
@@ -917,6 +1007,15 @@ export interface FileRouteTypes {
     | '/skills'
     | '/tasks'
     | '/terminal'
+    | '/api/agency-agent-delete'
+    | '/api/agency-agent-upsert'
+    | '/api/agency-file'
+    | '/api/agency-heartbeats'
+    | '/api/agency-mission-create'
+    | '/api/agency-mission-update'
+    | '/api/agency-settings'
+    | '/api/agency-state'
+    | '/api/agency-task-action'
     | '/api/auth'
     | '/api/auth-check'
     | '/api/chat-events'
@@ -1007,6 +1106,15 @@ export interface FileRouteTypes {
     | '/skills'
     | '/tasks'
     | '/terminal'
+    | '/api/agency-agent-delete'
+    | '/api/agency-agent-upsert'
+    | '/api/agency-file'
+    | '/api/agency-heartbeats'
+    | '/api/agency-mission-create'
+    | '/api/agency-mission-update'
+    | '/api/agency-settings'
+    | '/api/agency-state'
+    | '/api/agency-task-action'
     | '/api/auth'
     | '/api/auth-check'
     | '/api/chat-events'
@@ -1098,6 +1206,15 @@ export interface RootRouteChildren {
   SkillsRoute: typeof SkillsRoute
   TasksRoute: typeof TasksRoute
   TerminalRoute: typeof TerminalRoute
+  ApiAgencyAgentDeleteRoute: typeof ApiAgencyAgentDeleteRoute
+  ApiAgencyAgentUpsertRoute: typeof ApiAgencyAgentUpsertRoute
+  ApiAgencyFileRoute: typeof ApiAgencyFileRoute
+  ApiAgencyHeartbeatsRoute: typeof ApiAgencyHeartbeatsRoute
+  ApiAgencyMissionCreateRoute: typeof ApiAgencyMissionCreateRoute
+  ApiAgencyMissionUpdateRoute: typeof ApiAgencyMissionUpdateRoute
+  ApiAgencySettingsRoute: typeof ApiAgencySettingsRoute
+  ApiAgencyStateRoute: typeof ApiAgencyStateRoute
+  ApiAgencyTaskActionRoute: typeof ApiAgencyTaskActionRoute
   ApiAuthRoute: typeof ApiAuthRoute
   ApiAuthCheckRoute: typeof ApiAuthCheckRoute
   ApiChatEventsRoute: typeof ApiChatEventsRoute
@@ -1552,6 +1669,69 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/agency-task-action': {
+      id: '/api/agency-task-action'
+      path: '/api/agency-task-action'
+      fullPath: '/api/agency-task-action'
+      preLoaderRoute: typeof ApiAgencyTaskActionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-state': {
+      id: '/api/agency-state'
+      path: '/api/agency-state'
+      fullPath: '/api/agency-state'
+      preLoaderRoute: typeof ApiAgencyStateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-settings': {
+      id: '/api/agency-settings'
+      path: '/api/agency-settings'
+      fullPath: '/api/agency-settings'
+      preLoaderRoute: typeof ApiAgencySettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-mission-update': {
+      id: '/api/agency-mission-update'
+      path: '/api/agency-mission-update'
+      fullPath: '/api/agency-mission-update'
+      preLoaderRoute: typeof ApiAgencyMissionUpdateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-mission-create': {
+      id: '/api/agency-mission-create'
+      path: '/api/agency-mission-create'
+      fullPath: '/api/agency-mission-create'
+      preLoaderRoute: typeof ApiAgencyMissionCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-heartbeats': {
+      id: '/api/agency-heartbeats'
+      path: '/api/agency-heartbeats'
+      fullPath: '/api/agency-heartbeats'
+      preLoaderRoute: typeof ApiAgencyHeartbeatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-file': {
+      id: '/api/agency-file'
+      path: '/api/agency-file'
+      fullPath: '/api/agency-file'
+      preLoaderRoute: typeof ApiAgencyFileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-agent-upsert': {
+      id: '/api/agency-agent-upsert'
+      path: '/api/agency-agent-upsert'
+      fullPath: '/api/agency-agent-upsert'
+      preLoaderRoute: typeof ApiAgencyAgentUpsertRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/agency-agent-delete': {
+      id: '/api/agency-agent-delete'
+      path: '/api/agency-agent-delete'
+      fullPath: '/api/agency-agent-delete'
+      preLoaderRoute: typeof ApiAgencyAgentDeleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/skills/uninstall': {
       id: '/api/skills/uninstall'
       path: '/uninstall'
@@ -1886,6 +2066,15 @@ const rootRouteChildren: RootRouteChildren = {
   SkillsRoute: SkillsRoute,
   TasksRoute: TasksRoute,
   TerminalRoute: TerminalRoute,
+  ApiAgencyAgentDeleteRoute: ApiAgencyAgentDeleteRoute,
+  ApiAgencyAgentUpsertRoute: ApiAgencyAgentUpsertRoute,
+  ApiAgencyFileRoute: ApiAgencyFileRoute,
+  ApiAgencyHeartbeatsRoute: ApiAgencyHeartbeatsRoute,
+  ApiAgencyMissionCreateRoute: ApiAgencyMissionCreateRoute,
+  ApiAgencyMissionUpdateRoute: ApiAgencyMissionUpdateRoute,
+  ApiAgencySettingsRoute: ApiAgencySettingsRoute,
+  ApiAgencyStateRoute: ApiAgencyStateRoute,
+  ApiAgencyTaskActionRoute: ApiAgencyTaskActionRoute,
   ApiAuthRoute: ApiAuthRoute,
   ApiAuthCheckRoute: ApiAuthCheckRoute,
   ApiChatEventsRoute: ApiChatEventsRoute,

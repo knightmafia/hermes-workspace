@@ -52,6 +52,7 @@ export function OperationsScreen() {
     agents,
     recentActivity,
     configQuery,
+    agencyQuery,
     sessionsQuery,
     cronJobsQuery,
     settings,
@@ -66,8 +67,9 @@ export function OperationsScreen() {
   } = useOperations()
 
   const isLoading =
-    configQuery.isPending || sessionsQuery.isPending || cronJobsQuery.isPending
+    configQuery.isPending || agencyQuery.isPending || sessionsQuery.isPending || cronJobsQuery.isPending
   const error =
+    (agencyQuery.error instanceof Error && agencyQuery.error.message) ||
     (configQuery.error instanceof Error && configQuery.error.message) ||
     (sessionsQuery.error instanceof Error && sessionsQuery.error.message) ||
     (cronJobsQuery.error instanceof Error && cronJobsQuery.error.message) ||
@@ -156,6 +158,8 @@ export function OperationsScreen() {
             >
               <OrchestratorCard
                 totalAgents={agents.length}
+                orchestratorName={settings.orchestratorName}
+                onSaveName={(orchestratorName) => saveSettings({ ...settings, orchestratorName })}
               />
             </motion.div>
 

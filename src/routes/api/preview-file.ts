@@ -11,6 +11,7 @@ import { extname, resolve as resolvePath } from 'node:path'
 import os from 'node:os'
 import { createFileRoute } from '@tanstack/react-router'
 import { isAuthenticated } from '../../server/auth-middleware'
+import { WAYMAKER_AGENCY_ROOT } from '../../server/waymaker-agency'
 
 const MAX_BYTES = 5 * 1024 * 1024 // 5MB ceiling for embedded previews
 const MIME_BY_EXT: Record<string, string> = {
@@ -38,6 +39,7 @@ function allowedPrefixes(): string[] {
   return [
     '/tmp',
     `${home}/tmp`,
+    WAYMAKER_AGENCY_ROOT,
     resolvePath(home, 'dispatch'),
     resolvePath(home, 'projects'),
     resolvePath(hermesHome, 'projects'),

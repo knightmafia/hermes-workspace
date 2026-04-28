@@ -170,6 +170,47 @@ pnpm dev                   # Starts on http://localhost:3000
 
 > **Verify:** Open `http://localhost:3000` and complete the onboarding flow. First connect the backend, then verify chat works. If your gateway exposes Hermes APIs, advanced features appear automatically.
 
+### Auto-Start Vs Dev Mode
+
+If you want Hermes Workspace to come up automatically at login, the stable setup is:
+
+- `ai.hermes.gateway` via launchd
+- `ai.hermes.dashboard` via launchd
+- `ai.hermes.webui` via launchd
+
+In this setup, the web UI on `:3000` is served by the launchd-managed
+`run_server.sh` wrapper, which builds the app and runs the stable server.
+
+Open the app normally at:
+
+```bash
+http://localhost:3000
+```
+
+**Important:** don't also run `pnpm dev` while `ai.hermes.webui` is active, or
+you can end up with two servers fighting over port `3000`, which causes weird
+reload/HMR behavior.
+
+To switch into live dev mode:
+
+```bash
+launchctl bootout gui/501/ai.hermes.webui
+cd /Users/knightmafia/hermes-workspace && pnpm dev
+```
+
+To switch back to the stable auto-start setup:
+
+```bash
+launchctl bootstrap gui/501 /Users/knightmafia/Library/LaunchAgents/ai.hermes.webui.plist 2>/dev/null || true
+launchctl kickstart -k gui/501/ai.hermes.webui
+```
+
+To verify the three auto-start services:
+
+```bash
+launchctl list | rg "ai.hermes.(gateway|dashboard|webui)"
+```
+
 ### Agent W Managed Companion
 
 When Hermes Workspace is running behind Agent W's local HTTPS proxy, the

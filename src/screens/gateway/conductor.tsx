@@ -1,20 +1,33 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   PlayIcon,
+  RefreshIcon,
   Rocket01Icon,
   Search01Icon,
   Settings01Icon,
   TaskDone01Icon,
 } from '@hugeicons/core-free-icons'
+import {
+  AgencyQueueCard,
+  AgencyReviewCard,
+} from '@/components/agency-inbox-cards'
+import FilePreviewDialog from '@/components/file-explorer/file-preview-dialog'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/prompt-kit/markdown'
+import { toast } from '@/components/ui/toast'
 import { OfficeView } from './components/office-view'
 import type { AgentWorkingRow } from './components/agents-working-panel'
 import { type GatewaySession } from '@/lib/gateway-api'
+import {
+  runAgencyTaskAction,
+  type AgencyActorRole,
+  type AgencyQueueItem,
+  type AgencyTaskAction,
+} from '@/lib/waymaker-agency-api'
 import { cn } from '@/lib/utils'
 import { type MissionHistoryEntry, type MissionHistoryWorkerDetail, useConductorGateway } from './hooks/use-conductor-gateway'
 
@@ -318,6 +331,65 @@ function formatRelativeTime(value: string | null | undefined, now: number): stri
   if (diffMinutes < 60) return `${diffMinutes}m ago`
   const diffHours = Math.floor(diffMinutes / 60)
   return `${diffHours}h ago`
+}
+
+type AgencyActionRequest = {
+  action: AgencyTaskAction
+  actor?: AgencyActorRole
+  missionId: string
+  taskId?: string | null
+  path: string
+  queueKey?: string
+  reviewId?: string
+  scope: 'queue' | 'review'
+  status?: string
+}
+
+function agencyActionToastLabel(action: AgencyTaskAction): string {
+  switch (action) {
+    case 'approve':
+      return 'Approval submitted'
+    case 'reject':
+      return 'Changes requested'
+    case 'start-review':
+      return 'Review started'
+    case 'mark-passed':
+      return 'Marked passed'
+    case 'mark-failed':
+      return 'Marked failed'
+    default:
+      return 'Action submitted'
+  }
+}
+
+function normalizeAgencyActionError(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : 'Failed to submit action'
+  if (message.includes('Only manager may')) {
+    return `Manager-only action: ${message}`
+  }
+  if (message.includes('Only manager or qa may')) {
+    return `Review authorization failed: ${message}`
+  }
+  if (message.includes('Only the task owner, manager, or qa may')) {
+    return `Task transition blocked: ${message}`
+  }
+  if (message.includes('requires approval before it can enter review')) {
+    return `Approval required before review: ${message}`
+  }
+  if (message.includes('valid actor role is required')) {
+    return 'This action could not be attributed to an agency role.'
+  }
+  return message
+}
+
+function agencyActionKey(input: AgencyActionRequest): string {
+  return [
+    input.scope,
+    input.queueKey ?? input.reviewId ?? input.missionId,
+    input.taskId ?? input.path,
+    input.action,
+  ].join(':')
 }
 
 function truncateContinuationText(text: string, limit = 500): string {
@@ -771,15 +843,80 @@ function deriveSessionStatus(session: GatewaySession): 'running' | 'completed' |
   return 'running'
 }
 
+type ActivityFilter = 'all' | 'completed' | 'needs-approval' | 'failed'
+
+function missionHistoryStatusMeta(status: MissionHistoryEntry['status']): {
+  label: string
+  title: string
+  badgeClass: string
+  titleClass: string
+  dotClass: string
+} {
+  switch (status) {
+    case 'completed':
+      return {
+        label: 'Complete',
+        title: 'Mission Complete',
+        badgeClass: 'border border-emerald-400/35 bg-emerald-500/10 text-emerald-300',
+        titleClass: 'text-[var(--theme-accent)]',
+        dotClass: 'bg-emerald-400',
+      }
+    case 'needs-approval':
+      return {
+        label: 'Needs Approval',
+        title: 'Needs Approval',
+        badgeClass: 'border border-amber-400/35 bg-amber-500/10 text-amber-300',
+        titleClass: 'text-amber-300',
+        dotClass: 'bg-amber-400',
+      }
+    case 'blocked':
+    case 'paused':
+    case 'review':
+    case 'running':
+    case 'proposed':
+      return {
+        label: status.replace('-', ' '),
+        title: status === 'review' ? 'Mission In Review' : 'Mission Active',
+        badgeClass: 'border border-sky-400/35 bg-sky-500/10 text-sky-300',
+        titleClass: 'text-sky-300',
+        dotClass: 'bg-sky-400',
+      }
+    case 'canceled':
+      return {
+        label: 'Canceled',
+        title: 'Mission Canceled',
+        badgeClass: 'border border-zinc-400/35 bg-zinc-500/10 text-zinc-300',
+        titleClass: 'text-zinc-300',
+        dotClass: 'bg-zinc-400',
+      }
+    case 'failed':
+    default:
+      return {
+        label: 'Failed',
+        title: 'Mission Failed',
+        badgeClass: 'border border-red-400/35 bg-red-500/10 text-red-300',
+        titleClass: 'text-red-400',
+        dotClass: 'bg-red-400',
+      }
+  }
+}
+
+function missionHistoryMatchesFilter(entry: MissionHistoryEntry, filter: ActivityFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'failed') return entry.status === 'failed' || entry.status === 'canceled'
+  return entry.status === filter
+}
+
 export function Conductor() {
   const conductor = useConductorGateway()
+  const queryClient = useQueryClient()
   const [goalDraft, setGoalDraft] = useState('')
   const [missionModalOpen, setMissionModalOpen] = useState(false)
   const [continueDraft, setContinueDraft] = useState('')
   const [continueModalOpen, setContinueModalOpen] = useState(false)
   const [selectedAction, setSelectedAction] = useState<QuickActionId>('build')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [activityFilter, setActivityFilter] = useState<'all' | 'completed' | 'failed'>('all')
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
   const [activityPage, setActivityPage] = useState(0)
   const [completeCostExpanded, setCompleteCostExpanded] = useState(true)
   const [historyCostExpanded, setHistoryCostExpanded] = useState(false)
@@ -790,6 +927,7 @@ export function Conductor() {
   const [directoryBrowserEntries, setDirectoryBrowserEntries] = useState<FileBrowserEntry[]>([])
   const [directoryBrowserLoading, setDirectoryBrowserLoading] = useState(false)
   const [directoryBrowserError, setDirectoryBrowserError] = useState<string | null>(null)
+  const [previewPath, setPreviewPath] = useState<string | null>(null)
   const modelsQuery = useQuery({
     queryKey: ['conductor', 'models'],
     queryFn: async () => {
@@ -801,6 +939,32 @@ export function Conductor() {
     staleTime: 60_000,
   })
   const availableModels = modelsQuery.data ?? []
+  const agencyActionMutation = useMutation({
+    mutationFn: async (input: AgencyActionRequest) => {
+      if (!input.taskId) {
+        throw new Error('taskId is required for agency actions')
+      }
+      await runAgencyTaskAction({
+        missionId: input.missionId,
+        taskId: input.taskId,
+        action: input.action,
+        actor: input.actor || 'manager',
+      })
+    },
+    onSuccess: async (_data, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['conductor', 'agency-state'] }),
+        queryClient.invalidateQueries({ queryKey: ['jobs', 'agency-state'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'agency-state'] }),
+      ])
+      toast(agencyActionToastLabel(variables.action))
+    },
+    onError: (error) => {
+      toast(normalizeAgencyActionError(error), {
+        type: 'error',
+      })
+    },
+  })
 
   useEffect(() => {
     if (!directoryBrowserOpen) return
@@ -1020,7 +1184,11 @@ export function Conductor() {
     if (conductor.workers.length > 0) {
       return conductor.workers.map((worker, index) => {
         const persona = getAgentPersona(index)
-        const currentTask = conductor.tasks.find((task) => task.workerKey === worker.key && task.status === 'running')?.title
+        const currentTask = conductor.tasks.find((task) => (
+          (task.workerKey === worker.key ||
+            (task.owner && worker.label.toLowerCase().startsWith(`${task.owner.toLowerCase()}-`))) &&
+          task.status === 'running'
+        ))?.title
         const lastLine = conductor.workerOutputs[worker.key] ?? getLastAssistantMessage(worker.raw.messages as HistoryMessage[] | undefined)
         const isWorkerPaused = conductor.isPaused && (worker.status === 'running' || worker.status === 'idle')
 
@@ -1032,7 +1200,10 @@ export function Conductor() {
           status: isWorkerPaused ? 'paused' : worker.status === 'complete' ? 'idle' : worker.status === 'stale' ? 'error' : 'active',
           lastLine: isWorkerPaused ? 'Paused' : lastLine,
           lastAt: worker.updatedAt ? new Date(worker.updatedAt).getTime() : undefined,
-          taskCount: conductor.tasks.filter((task) => task.workerKey === worker.key).length,
+          taskCount: conductor.tasks.filter((task) => (
+            task.workerKey === worker.key ||
+            (task.owner && worker.label.toLowerCase().startsWith(`${task.owner.toLowerCase()}-`))
+          )).length,
           currentTask: isWorkerPaused ? 'Paused' : currentTask,
           sessionKey: worker.key,
         }
@@ -1159,8 +1330,7 @@ export function Conductor() {
   const canResetSavedState = hasMissionHistory || conductor.hasPersistedMission
   const filteredHistory = (() => {
     const history = conductor.missionHistory
-    if (activityFilter === 'all') return history
-    return history.filter((entry) => entry.status === activityFilter)
+    return history.filter((entry) => missionHistoryMatchesFilter(entry, activityFilter))
   })()
   const filteredSessions = (() => {
     const sessions = conductor.recentSessions
@@ -1169,6 +1339,69 @@ export function Conductor() {
       .filter((session) => ((session.label as string) ?? '').startsWith('worker-'))
       .filter((session) => deriveSessionStatus(session as GatewaySession) === activityFilter)
   })()
+  const activeAgencyMissionId = conductor.agencyMissionId
+  const scopedAgencyQueues = useMemo(() => {
+    const queues = conductor.agencyState?.queues
+    const scopeItems = (items: AgencyQueueItem[] = []) => {
+      if (!activeAgencyMissionId) return items
+      const scoped = items.filter((item) => item.missionId === activeAgencyMissionId)
+      return scoped.length > 0 ? scoped : items
+    }
+
+    return {
+      approvals: scopeItems(queues?.approvals ?? []),
+      stale: scopeItems(queues?.stale ?? []),
+      blocked: scopeItems(queues?.blocked ?? []),
+      failed: scopeItems(queues?.failed ?? []),
+    }
+  }, [conductor.agencyState?.queues, activeAgencyMissionId])
+  const scopedAgencyReviews = useMemo(() => {
+    const reviews = conductor.agencyState?.reviews ?? []
+    if (!activeAgencyMissionId) return reviews
+    const scoped = reviews.filter((review) => review.missionId === activeAgencyMissionId)
+    return scoped.length > 0 ? scoped : reviews
+  }, [conductor.agencyState?.reviews, activeAgencyMissionId])
+  const managerInboxSections = useMemo(
+    () => [
+      {
+        key: 'approvals',
+        title: 'Approvals',
+        subtitle: 'Human decisions waiting',
+        items: scopedAgencyQueues.approvals,
+      },
+      {
+        key: 'stale',
+        title: 'Stale Work',
+        subtitle: 'Past due or review time',
+        items: scopedAgencyQueues.stale,
+      },
+      {
+        key: 'blocked',
+        title: 'Blocked Work',
+        subtitle: 'Dependencies or missing context',
+        items: scopedAgencyQueues.blocked,
+      },
+      {
+        key: 'failed',
+        title: 'Failed Work',
+        subtitle: 'Needs disposition or retry plan',
+        items: scopedAgencyQueues.failed,
+      },
+    ],
+    [scopedAgencyQueues],
+  )
+  const managerInboxCount = managerInboxSections.reduce((sum, section) => sum + section.items.length, 0)
+  const pendingAgencyActionKey = agencyActionMutation.isPending
+    ? agencyActionKey(agencyActionMutation.variables as AgencyActionRequest)
+    : null
+  const handleAgencyAction = (input: AgencyActionRequest) => {
+    agencyActionMutation.mutate(input)
+  }
+  const handlePreviewSaved = () => {
+    void queryClient.invalidateQueries({ queryKey: ['conductor', 'agency-state'] })
+    void queryClient.invalidateQueries({ queryKey: ['jobs', 'agency-state'] })
+    void queryClient.invalidateQueries({ queryKey: ['dashboard', 'agency-state'] })
+  }
   const activityItems: Array<MissionHistoryEntry | GatewaySession> = hasMissionHistory ? filteredHistory : filteredSessions
   const ACTIVITY_PAGE_SIZE = 3
   const activityTotalPages = Math.max(1, Math.ceil(activityItems.length / ACTIVITY_PAGE_SIZE))
@@ -1197,11 +1430,7 @@ export function Conductor() {
       const historySummary = selectedHistoryEntry.completeSummary ?? selectedHistoryEntry.streamText
       const historyOutputText = selectedHistoryEntry.outputText?.trim() || selectedHistoryEntry.streamText?.trim() || ''
       const showHistoryOutputFallback = !!historyOutputText && (!selectedHistoryOutputPath || selectedHistoryPreview.unavailable)
-      const historyStatusLabel = selectedHistoryEntry.status === 'completed' ? 'Complete' : 'Stopped'
-      const historyStatusClasses =
-        selectedHistoryEntry.status === 'completed'
-          ? 'border border-emerald-400/35 bg-emerald-500/10 text-emerald-300'
-          : 'border border-red-400/35 bg-red-500/10 text-red-300'
+      const historyStatus = missionHistoryStatusMeta(selectedHistoryEntry.status)
 
       return (
         <div className="flex min-h-dvh flex-col overflow-y-auto bg-[var(--theme-bg)] text-[var(--theme-text)]" style={THEME_STYLE}>
@@ -1218,8 +1447,8 @@ export function Conductor() {
               <div className="overflow-hidden rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-card)] p-6 shadow-[0_24px_80px_var(--theme-shadow)]">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className={cn('text-xs font-semibold uppercase tracking-[0.24em]', selectedHistoryEntry.status === 'completed' ? 'text-[var(--theme-accent)]' : 'text-red-400')}>
-                      {selectedHistoryEntry.status === 'completed' ? 'Mission Complete' : 'Mission Stopped'}
+                    <p className={cn('text-xs font-semibold uppercase tracking-[0.24em]', historyStatus.titleClass)}>
+                      {historyStatus.title}
                     </p>
                     <h1 className="mt-2 text-xl font-semibold tracking-tight text-[var(--theme-text)] sm:text-2xl">{selectedHistoryEntry.goal}</h1>
                     <p className="mt-2 text-xs text-[var(--theme-muted-2)]">
@@ -1282,8 +1511,8 @@ export function Conductor() {
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--theme-muted)]">Agent Summary</p>
                   </div>
-                  <span className={cn('rounded-full px-3 py-1 text-xs font-medium', historyStatusClasses)}>
-                    {historyStatusLabel}
+                  <span className={cn('rounded-full px-3 py-1 text-xs font-medium', historyStatus.badgeClass)}>
+                    {historyStatus.label}
                   </span>
                 </div>
                 <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-5 py-4">
@@ -1297,7 +1526,7 @@ export function Conductor() {
                   <div className="mt-4 space-y-2">
                     {historyWorkerDetails.map((worker: MissionHistoryWorkerDetail, index) => (
                       <div key={`${selectedHistoryEntry.id}-worker-${index}`} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm">
-                        <span className={cn('size-2 rounded-full', selectedHistoryEntry.status === 'completed' ? 'bg-emerald-400' : 'bg-red-400')} />
+                        <span className={cn('size-2 rounded-full', historyStatus.dotClass)} />
                         <span className="font-medium text-[var(--theme-text)]">{worker.personaEmoji} {worker.personaName}</span>
                         <span className="text-[var(--theme-muted)]">{worker.label}</span>
                         <span className="ml-auto text-xs text-[var(--theme-muted)]">{getShortModelName(worker.model)} · {worker.totalTokens.toLocaleString()} tok</span>
@@ -1434,7 +1663,7 @@ export function Conductor() {
                   )}
                 </div>
                 <div className="flex items-center gap-1">
-                  {(['all', 'completed', 'failed'] as const).map((filter) => (
+                  {(['all', 'completed', 'needs-approval', 'failed'] as const).map((filter) => (
                     <button
                       key={filter}
                       type="button"
@@ -1449,7 +1678,7 @@ export function Conductor() {
                           : 'border-[var(--theme-border)] text-[var(--theme-muted-2)] hover:border-[var(--theme-accent)] hover:text-[var(--theme-text)]',
                       )}
                     >
-                      {filter}
+                      {filter.replace('-', ' ')}
                     </button>
                   ))}
                 </div>
@@ -1458,6 +1687,7 @@ export function Conductor() {
                     {hasMissionHistory
                       ? visibleActivityItems.map((item) => {
                           const entry = item as MissionHistoryEntry
+                          const statusMeta = missionHistoryStatusMeta(entry.status)
                           return (
                             <button
                               key={entry.id}
@@ -1468,13 +1698,11 @@ export function Conductor() {
                               <span className="min-w-0 flex-1 truncate font-medium text-[var(--theme-text)]">{entry.goal}</span>
                               <span
                                 className={cn(
-                                  'w-[76px] shrink-0 rounded-full border px-2 py-0.5 text-center text-[10px] font-medium uppercase tracking-[0.12em]',
-                                  entry.status === 'completed'
-                                    ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-300'
-                                    : 'border-red-400/35 bg-red-500/10 text-red-300',
+                                  'w-[104px] shrink-0 rounded-full border px-2 py-0.5 text-center text-[10px] font-medium uppercase tracking-[0.12em]',
+                                  statusMeta.badgeClass,
                                 )}
                               >
-                                {entry.status === 'completed' ? 'Complete' : 'Failed'}
+                                {statusMeta.label}
                               </span>
                               <span className="w-[52px] shrink-0 text-right text-xs text-[var(--theme-muted-2)]">{formatRelativeTime(entry.completedAt, now)}</span>
                               <span className="w-[72px] shrink-0 text-right text-xs text-[var(--theme-muted)]">{entry.totalTokens.toLocaleString()} tok</span>
@@ -1687,25 +1915,22 @@ export function Conductor() {
                       min={1}
                       max={5}
                       value={conductor.conductorSettings.maxParallel}
-                      onChange={(event) =>
-                        updateSettings({
-                          maxParallel: Math.min(5, Math.max(1, Number(event.target.value) || 1)),
-                        })
-                      }
+                      disabled
                       className="w-full rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-4 py-3 text-sm text-[var(--theme-text)] outline-none transition-colors focus:border-[var(--theme-accent)]"
                     />
+                    <p className="text-xs text-[var(--theme-muted-2)]">Gate 3 lock: one worker at a time.</p>
                   </label>
 
                   <label className="flex items-start gap-3 rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-4 py-4">
                     <input
                       type="checkbox"
                       checked={conductor.conductorSettings.supervised}
-                      onChange={(event) => updateSettings({ supervised: event.target.checked })}
+                      disabled
                       className="mt-1 size-4 rounded border-[var(--theme-border2)] accent-[var(--theme-accent)]"
                     />
                     <span className="min-w-0">
                       <span className="block text-sm font-medium text-[var(--theme-text)]">Supervised Mode</span>
-                      <span className="mt-1 block text-sm text-[var(--theme-muted-2)]">Require approval before each task</span>
+                      <span className="mt-1 block text-sm text-[var(--theme-muted-2)]">Gate 3 lock: approval is required before each task transition.</span>
                     </span>
                   </label>
 
@@ -2392,6 +2617,86 @@ export function Conductor() {
             />
           </section>
 
+          <section className="overflow-hidden rounded-3xl border border-[var(--theme-border)] bg-[var(--theme-card)] p-5 shadow-[0_24px_80px_var(--theme-shadow)]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--theme-muted)]">Manager Inbox</p>
+                <p className="mt-1 text-sm text-[var(--theme-muted-2)]">
+                  {activeAgencyMissionId ? 'Focused on the current agency mission.' : 'Durable agency queue for the whole workforce.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-bg)] px-3 py-1.5 text-[11px] font-medium text-[var(--theme-text)]">
+                  {managerInboxCount} needs attention
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void conductor.refreshAgencyState()}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-1.5 text-xs font-medium text-[var(--theme-text)] transition-colors hover:border-[var(--theme-accent)] hover:text-[var(--theme-accent-strong)]"
+                >
+                  <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.7} />
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            {conductor.isAgencyLoading ? (
+              <div className="mt-4 rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg)] px-4 py-6 text-sm text-[var(--theme-muted)]">
+                Loading agency inbox...
+              </div>
+            ) : conductor.agencyError ? (
+              <div className="mt-4 rounded-2xl border border-[var(--theme-danger-border)] bg-[var(--theme-danger-soft)] px-4 py-6 text-sm text-[var(--theme-danger)]">
+                {conductor.agencyError instanceof Error ? conductor.agencyError.message : 'Failed to load agency inbox.'}
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {managerInboxSections.map((section) => (
+                    <AgencyQueueCard
+                      key={section.key}
+                      queueKey={section.key}
+                      title={section.title}
+                      subtitle={section.subtitle}
+                      items={section.items}
+                      onAction={handleAgencyAction}
+                      onPreview={setPreviewPath}
+                      pendingActionKey={pendingAgencyActionKey}
+                    />
+                  ))}
+                </div>
+
+                <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-card)] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[var(--theme-text)]">Recent Reviews</h3>
+                      <p className="mt-1 text-xs text-[var(--theme-muted-2)]">Latest durable sign-off records for this mission scope.</p>
+                    </div>
+                    <span className="rounded-full border border-[var(--theme-border)] bg-[var(--theme-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--theme-muted)]">
+                      {scopedAgencyReviews.length}
+                    </span>
+                  </div>
+                  {scopedAgencyReviews.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[var(--theme-border)] bg-[var(--theme-bg)] px-3 py-4 text-xs text-[var(--theme-muted)]">
+                      No review records yet.
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 xl:grid-cols-2">
+                      {scopedAgencyReviews.slice(0, 4).map((review) => (
+                        <AgencyReviewCard
+                          key={review.id}
+                          review={review}
+                          onAction={handleAgencyAction}
+                          onPreview={setPreviewPath}
+                          pendingActionKey={pendingAgencyActionKey}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
           {conductor.tasks.length > 0 ? (
             <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
               <div className="space-y-2">
@@ -2437,8 +2742,13 @@ export function Conductor() {
                 ) : null}
                 {(() => {
                   const selectedTask = selectedTaskId ? conductor.tasks.find((task) => task.id === selectedTaskId) : null
-                  const displayWorkers = selectedTask?.workerKey
-                    ? conductor.workers.filter((worker) => worker.key === selectedTask.workerKey)
+                  const displayWorkers = selectedTask?.workerKey || selectedTask?.owner
+                    ? conductor.workers.filter((worker) => (
+                        worker.key === selectedTask?.workerKey ||
+                        (selectedTask?.owner
+                          ? worker.label.toLowerCase().startsWith(`${selectedTask.owner.toLowerCase()}-`)
+                          : false)
+                      ))
                     : conductor.workers
                   return (
                     <div className="grid gap-3 md:grid-cols-2">
@@ -2494,6 +2804,12 @@ export function Conductor() {
 
         </div>
       </main>
+      <FilePreviewDialog
+        path={previewPath}
+        source="agency"
+        onClose={() => setPreviewPath(null)}
+        onSaved={handlePreviewSaved}
+      />
     </div>
   )
 }

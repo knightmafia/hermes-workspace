@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { fetchSessions, type GatewaySession } from '@/lib/gateway-api'
+import {
+  createAgencyMissionRecord,
+  fetchAgencyState,
+  type AgencyState,
+  updateAgencyMissionRecord,
+} from '@/lib/waymaker-agency-api'
 
 type HistoryMessagePart = {
   type?: string
@@ -34,10 +40,11 @@ const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   workerModel: '',
   projectsDir: '',
   maxParallel: 1,
-  supervised: false,
+  supervised: true,
 }
 
 type PersistedMission = {
+  agencyMissionId?: string | null
   goal: string
   phase: MissionPhase
   missionStartedAt: string | null
@@ -79,6 +86,7 @@ export type ConductorTask = {
   id: string
   title: string
   status: 'pending' | 'running' | 'complete' | 'failed'
+  owner: string | null
   workerKey: string | null
   output: string | null
 }
@@ -91,6 +99,17 @@ export type MissionHistoryWorkerDetail = {
   personaName: string
 }
 
+export type MissionHistoryStatus =
+  | 'proposed'
+  | 'running'
+  | 'paused'
+  | 'blocked'
+  | 'needs-approval'
+  | 'review'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+
 export type MissionHistoryEntry = {
   id: string
   goal: string
@@ -98,7 +117,7 @@ export type MissionHistoryEntry = {
   completedAt: string
   workerCount: number
   totalTokens: number
-  status: 'completed' | 'failed'
+  status: MissionHistoryStatus
   projectPath: string | null
   outputPath?: string | null
   workerSummary?: string[]
@@ -122,6 +141,57 @@ function getAgentPersona(index: number) {
   }
 }
 
+const AGENCY_ROLE_IDS = ['manager', 'research', 'builder', 'qa', 'ops', 'outreach'] as const
+type AgencyRoleId = (typeof AGENCY_ROLE_IDS)[number]
+
+function normalizeTaskOwner(value: string | null | undefined): string | null {
+  const normalized = (value || '').trim().toLowerCase()
+  if (!normalized) return null
+  return AGENCY_ROLE_IDS.includes(normalized as AgencyRoleId)
+    ? normalized
+    : null
+}
+
+function splitTaskOwner(rawTitle: string): { owner: string | null; title: string } {
+  const title = rawTitle.replace(/\*\*/g, '').trim()
+  const bracketMatch = title.match(/^\[(manager|research|builder|qa|ops|outreach)\]\s*(.+)$/i)
+  if (bracketMatch) {
+    return {
+      owner: normalizeTaskOwner(bracketMatch[1]),
+      title: bracketMatch[2].trim(),
+    }
+  }
+
+  const prefixMatch = title.match(/^(manager|research|builder|qa|ops|outreach)\s*:\s*(.+)$/i)
+  if (prefixMatch) {
+    return {
+      owner: normalizeTaskOwner(prefixMatch[1]),
+      title: prefixMatch[2].trim(),
+    }
+  }
+
+  return { owner: null, title }
+}
+
+function findWorkerForTask(task: ConductorTask, workers: ConductorWorker[]): ConductorWorker | null {
+  if (task.workerKey) {
+    const exact = workers.find((worker) => worker.key === task.workerKey)
+    if (exact) return exact
+  }
+
+  if (task.owner) {
+    const rolePrefix = `${task.owner}-`
+    const roleMatch = workers.find((worker) => worker.label.toLowerCase() === task.owner || worker.label.toLowerCase().startsWith(rolePrefix))
+    if (roleMatch) return roleMatch
+  }
+
+  return null
+}
+
+function isRolePrefixedWorkerLabel(label: string): boolean {
+  const normalized = label.trim().toLowerCase()
+  return AGENCY_ROLE_IDS.some((role) => normalized === role || normalized.startsWith(`${role}-`))
+}
 
 function extractTasksFromPlan(planText: string): ConductorTask[] {
   const tasks: ConductorTask[] = []
@@ -136,11 +206,11 @@ function extractTasksFromPlan(planText: string): ConductorTask[] {
     let match: RegExpExecArray | null
     while ((match = pattern.exec(planText)) !== null) {
       const num = match[1]
-      const title = match[2].replace(/\*\*/g, '').trim()
+      const { owner, title } = splitTaskOwner(match[2])
       const id = `task-${num}`
       if (!seen.has(id) && title.length > 3 && title.length < 200) {
         seen.add(id)
-        tasks.push({ id, title, status: 'pending', workerKey: null, output: null })
+        tasks.push({ id, title, status: 'pending', owner, workerKey: null, output: null })
       }
     }
   }
@@ -229,6 +299,10 @@ function loadPersistedMission(): PersistedMission | null {
               id,
               title,
               status,
+              owner:
+                record.owner === null || record.owner === undefined
+                  ? null
+                  : normalizeTaskOwner(readString(record.owner)),
               workerKey: record.workerKey === null || record.workerKey === undefined ? null : readString(record.workerKey),
               output: record.output === null || record.output === undefined ? null : readString(record.output),
             }
@@ -251,6 +325,10 @@ function loadPersistedMission(): PersistedMission | null {
     const isStale = phase === 'running' || phase === 'decomposing'
 
     return {
+      agencyMissionId:
+        typeof parsed.agencyMissionId === 'string' && parsed.agencyMissionId.trim()
+          ? parsed.agencyMissionId
+          : null,
       goal: isStale ? '' : goal,
       phase: isStale ? 'idle' : phase,
       missionStartedAt: isStale ? null : missionStartedAt,
@@ -280,8 +358,8 @@ function loadConductorSettings(): ConductorSettings {
       orchestratorModel: typeof parsed.orchestratorModel === 'string' ? parsed.orchestratorModel : DEFAULT_CONDUCTOR_SETTINGS.orchestratorModel,
       workerModel: typeof parsed.workerModel === 'string' ? parsed.workerModel : DEFAULT_CONDUCTOR_SETTINGS.workerModel,
       projectsDir: typeof parsed.projectsDir === 'string' ? parsed.projectsDir : DEFAULT_CONDUCTOR_SETTINGS.projectsDir,
-      maxParallel: Math.min(5, Math.max(1, typeof parsed.maxParallel === 'number' && Number.isFinite(parsed.maxParallel) ? Math.round(parsed.maxParallel) : DEFAULT_CONDUCTOR_SETTINGS.maxParallel)),
-      supervised: typeof parsed.supervised === 'boolean' ? parsed.supervised : DEFAULT_CONDUCTOR_SETTINGS.supervised,
+      maxParallel: 1,
+      supervised: true,
     }
   } catch {
     return DEFAULT_CONDUCTOR_SETTINGS
@@ -337,6 +415,77 @@ function loadMissionHistory(): MissionHistoryEntry[] {
       .slice(0, MAX_HISTORY_ENTRIES)
   } catch {
     return []
+  }
+}
+
+function normalizeMissionHistoryStatus(status: string | null | undefined): MissionHistoryStatus {
+  switch ((status || '').trim()) {
+    case 'proposed':
+    case 'running':
+    case 'paused':
+    case 'blocked':
+    case 'needs-approval':
+    case 'review':
+    case 'completed':
+    case 'failed':
+    case 'canceled':
+      return status as MissionHistoryStatus
+    default:
+      return 'failed'
+  }
+}
+
+function shouldShowAgencyMissionInHistory(mission: AgencyState['missions'][number]): boolean {
+  const status = normalizeMissionHistoryStatus(mission.status)
+  return ['completed', 'failed', 'canceled', 'needs-approval', 'blocked', 'review', 'paused'].includes(status)
+}
+
+function mapAgencyMissionToHistory(
+  mission: AgencyState['missions'][number],
+): MissionHistoryEntry {
+  const workerDetails =
+    mission.workerLabels.length > 0
+      ? mission.workerLabels.map((label, index) => {
+          const persona = getAgentPersona(index)
+          return {
+            label,
+            model: '',
+            totalTokens: 0,
+            personaEmoji: persona.emoji,
+            personaName: persona.name,
+          }
+        })
+      : undefined
+
+  const outputText =
+    Object.values(mission.workerOutputs).join('\n\n---\n\n').trim() ||
+    mission.streamText.trim() ||
+    undefined
+
+  return {
+    id: mission.id,
+    goal: mission.goal || mission.title,
+    startedAt: mission.startedAt || new Date().toISOString(),
+    completedAt: mission.completedAt || mission.startedAt || new Date().toISOString(),
+    workerCount: mission.workerCount || mission.workerLabels.length || mission.tasks.length,
+    totalTokens: 0,
+    status: normalizeMissionHistoryStatus(mission.status),
+    projectPath: mission.outputPath || null,
+    outputPath: mission.outputPath || null,
+    workerSummary:
+      mission.tasks.length > 0
+        ? mission.tasks.map((task) => {
+            const owner = task.owner || task.workerKey || task.id
+            return `${owner}: ${task.status} - ${task.title}`
+          })
+        : mission.workerLabels.length > 0
+          ? mission.workerLabels.map((label) => `${label}: ${mission.status}`)
+        : undefined,
+    outputText,
+    streamText: mission.streamText?.trim() || undefined,
+    completeSummary: mission.summary?.trim() || undefined,
+    workerDetails,
+    error: mission.error?.trim() || undefined,
   }
 }
 
@@ -633,6 +782,8 @@ async function fetchWorkerOutput(sessionKey: string, limit = 5): Promise<string>
 
 export function useConductorGateway() {
   const [initialMission] = useState<PersistedMission | null>(() => loadPersistedMission())
+  const [localMissionHistory, setLocalMissionHistory] = useState<MissionHistoryEntry[]>(() => loadMissionHistory())
+  const [agencyMissionId, setAgencyMissionId] = useState<string | null>(() => initialMission?.agencyMissionId ?? null)
   const [phase, setPhase] = useState<MissionPhase>(() => initialMission?.phase ?? 'idle')
   const [goal, setGoal] = useState(() => initialMission?.goal ?? '')
   const [orchestratorSessionKey, setOrchestratorSessionKey] = useState<string | null>(() => initialMission?.workerKeys[0] ?? null)
@@ -655,6 +806,7 @@ export function useConductorGateway() {
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<MissionHistoryEntry | null>(null)
   const [conductorSettings, setConductorSettings] = useState<ConductorSettings>(() => loadConductorSettings())
   const doneRef = useRef(initialMission?.phase === 'complete')
+  const agencyMissionSnapshotRef = useRef('')
   const seenToolCallRef = useRef(false)
   const historySavedRef = useRef(false)
   const lastActivityAtRef = useRef<number>(Date.now())
@@ -677,8 +829,17 @@ export function useConductorGateway() {
           }
 
           // Match by worker label pattern
-          if (label.startsWith('worker-') || label.startsWith('conductor-')) {
+          if (label.startsWith('worker-') || label.startsWith('conductor-') || isRolePrefixedWorkerLabel(label)) {
             if (missionWorkerLabels.size > 0 && missionWorkerLabels.has(label)) {
+              return true
+            }
+            if (
+              missionWorkerLabels.size > 0 &&
+              [...missionWorkerLabels].some((roleLabel) => {
+                const normalizedRole = normalizeTaskOwner(roleLabel)
+                return normalizedRole ? label.toLowerCase().startsWith(`${normalizedRole}-`) : false
+              })
+            ) {
               return true
             }
             // Match by creation time (workers spawned after mission start)
@@ -723,7 +884,11 @@ export function useConductorGateway() {
           const key = readString(session.key) ?? ''
           const updatedAt = toIso(session.updatedAt ?? session.startedAt ?? session.createdAt)
           if (!updatedAt) return false
-          return (label.startsWith('worker-') || key.includes(':subagent:')) && new Date(updatedAt).getTime() >= cutoff
+          return (
+            label.startsWith('worker-') ||
+            isRolePrefixedWorkerLabel(label) ||
+            key.includes(':subagent:')
+          ) && new Date(updatedAt).getTime() >= cutoff
         })
         .sort((a, b) => {
           const updatedA = new Date(toIso(a.updatedAt ?? a.startedAt ?? a.createdAt) ?? 0).getTime()
@@ -736,7 +901,38 @@ export function useConductorGateway() {
     refetchInterval: false,
   })
 
+  const agencyStateQuery = useQuery({
+    queryKey: ['conductor', 'agency-state'],
+    queryFn: fetchAgencyState,
+    refetchInterval: 30_000,
+  })
+
   const workers = sessionsQuery.data ?? []
+  const agencyMissionHistory = useMemo(
+    () =>
+      (agencyStateQuery.data?.missions ?? [])
+        .filter(shouldShowAgencyMissionInHistory)
+        .map(mapAgencyMissionToHistory),
+    [agencyStateQuery.data?.missions],
+  )
+  const mergedMissionHistory = useMemo(() => {
+    const deduped = new Map<string, MissionHistoryEntry>()
+    for (const entry of [...agencyMissionHistory, ...localMissionHistory]) {
+      if (!deduped.has(entry.id)) deduped.set(entry.id, entry)
+    }
+    return [...deduped.values()].sort((left, right) => {
+      const leftTs = Date.parse(left.completedAt || left.startedAt) || 0
+      const rightTs = Date.parse(right.completedAt || right.startedAt) || 0
+      return rightTs - leftTs
+    })
+  }, [agencyMissionHistory, localMissionHistory])
+  const currentAgencyMission = useMemo(
+    () =>
+      agencyMissionId
+        ? (agencyStateQuery.data?.missions ?? []).find((mission) => mission.id === agencyMissionId) ?? null
+        : null,
+    [agencyMissionId, agencyStateQuery.data?.missions],
+  )
   const activeWorkers = useMemo(
     () => workers.filter((worker) => worker.status === 'running' || worker.status === 'idle'),
     [workers],
@@ -752,6 +948,48 @@ export function useConductorGateway() {
       isPaused && Number.isFinite(pauseStartedMs) ? Math.max(0, referenceTime - pauseStartedMs) : 0
     return Math.max(0, referenceTime - startedMs - accumulatedPausedMs - inFlightPausedMs)
   }
+
+  useEffect(() => {
+    if (!currentAgencyMission) return
+
+    const canonicalLabels = [
+      ...currentAgencyMission.workerLabels,
+      ...currentAgencyMission.tasks.map((task) => task.owner ?? '').filter(Boolean),
+    ]
+    if (canonicalLabels.length > 0) {
+      setMissionWorkerLabels((current) => {
+        const next = new Set(current)
+        let changed = false
+        for (const label of canonicalLabels) {
+          if (!next.has(label)) {
+            next.add(label)
+            changed = true
+          }
+        }
+        return changed ? next : current
+      })
+    }
+
+    if (currentAgencyMission.tasks.length > 0) {
+      setTasks(
+        currentAgencyMission.tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          status:
+            task.status === 'complete'
+              ? 'complete'
+              : task.status === 'failed' || task.status === 'blocked'
+                ? 'failed'
+                : task.status === 'running' || task.status === 'review' || task.status === 'ready'
+                  ? 'running'
+                  : 'pending',
+          owner: normalizeTaskOwner(task.owner),
+          workerKey: task.workerKey,
+          output: task.output,
+        })),
+      )
+    }
+  }, [currentAgencyMission])
 
   useEffect(() => {
     if (missionWorkerLabels.size === 0 || workers.length === 0) return
@@ -904,7 +1142,12 @@ export function useConductorGateway() {
       if (current.length >= extracted.length) return current
       return extracted.map((task) => {
         const existing = current.find((item) => item.id === task.id)
-        return existing ?? task
+        return existing
+          ? {
+              ...existing,
+              owner: existing.owner ?? task.owner,
+            }
+          : task
       })
     })
   }, [planText])
@@ -913,7 +1156,7 @@ export function useConductorGateway() {
     if (tasks.length === 0 || workers.length === 0) return
     setTasks((current) => {
       const updated = current.map((task, index) => {
-        const worker = workers[index]
+        const worker = findWorkerForTask(task, workers) ?? workers[index]
         if (!worker) return task
         const workerOutput = workerOutputs[worker.key] ?? null
         const newStatus: ConductorTask['status'] =
@@ -924,7 +1167,13 @@ export function useConductorGateway() {
               : worker.status === 'running'
                 ? 'running'
                 : task.status
-        if (task.workerKey === worker.key && task.status === newStatus && task.output === workerOutput) return task
+        if (
+          task.workerKey === worker.key &&
+          task.status === newStatus &&
+          task.output === workerOutput
+        ) {
+          return task
+        }
         return { ...task, workerKey: worker.key, status: newStatus, output: workerOutput }
       })
       const changed = updated.some((task, index) => task !== current[index])
@@ -938,7 +1187,7 @@ export function useConductorGateway() {
   useEffect(() => {
     if (phase !== 'complete' || !goal || !completedAt || !missionStartedAt) return
 
-    const missionId = `mission-${new Date(missionStartedAt).getTime()}`
+    const missionId = agencyMissionId ?? `mission-${new Date(missionStartedAt).getTime()}`
     const outputPath = buildMissionOutputPath(workers, workerOutputs, tasks, streamText)
     const workerSummary = summarizeWorkers(workers)
     const outputText = buildMissionOutputText(workers, workerOutputs, streamText)
@@ -986,17 +1235,21 @@ export function useConductorGateway() {
     // Update in-memory state: first save adds, subsequent saves update in-place
     if (historySaveCountRef.current === 0) {
       historySavedRef.current = true
-      setMissionHistory((current) => {
+      setLocalMissionHistory((current) => {
         if (current.some((e) => e.id === missionId)) return current
         return [entry, ...current].slice(0, MAX_HISTORY_ENTRIES)
       })
     } else {
-      setMissionHistory((current) =>
+      setLocalMissionHistory((current) =>
         current.map((e) => (e.id === missionId ? entry : e)),
       )
     }
     historySaveCountRef.current += 1
-  }, [phase, goal, completedAt, missionStartedAt, workers, streamError, workerOutputs, tasks, streamText])
+  }, [agencyMissionId, phase, goal, completedAt, missionStartedAt, workers, streamError, workerOutputs, tasks, streamText])
+
+  useEffect(() => {
+    setMissionHistory(mergedMissionHistory)
+  }, [mergedMissionHistory])
 
   useEffect(() => {
     persistConductorSettings(conductorSettings)
@@ -1011,6 +1264,7 @@ export function useConductorGateway() {
     }
 
     persistMission({
+      agencyMissionId,
       goal,
       phase,
       missionStartedAt,
@@ -1026,7 +1280,89 @@ export function useConductorGateway() {
       completedAt,
       tasks,
     })
-  }, [phase, goal, missionStartedAt, isPaused, pausedElapsedMs, accumulatedPausedMs, pauseStartedAt, completedAt, missionWorkerKeys, missionWorkerLabels, workerOutputs, streamText, planText, tasks])
+  }, [agencyMissionId, phase, goal, missionStartedAt, isPaused, pausedElapsedMs, accumulatedPausedMs, pauseStartedAt, completedAt, missionWorkerKeys, missionWorkerLabels, workerOutputs, streamText, planText, tasks])
+
+  useEffect(() => {
+    if (!agencyMissionId || phase === 'idle' || !missionStartedAt) return
+
+    const outputPath = buildMissionOutputPath(workers, workerOutputs, tasks, streamText)
+    const hasPendingApproval =
+      currentAgencyMission?.status === 'needs-approval' ||
+      currentAgencyMission?.approvalStatus === 'pending' ||
+      currentAgencyMission?.tasks?.some((task) => task.status === 'needs-approval' || task.approvalStatus === 'pending') ||
+      false
+    const status =
+      hasPendingApproval
+        ? 'needs-approval'
+        : phase === 'complete'
+        ? (streamError ? 'failed' : 'completed')
+        : isPaused
+          ? 'paused'
+          : phase === 'decomposing'
+            ? 'proposed'
+            : 'running'
+    const patch: Record<string, unknown> = {
+      title: goal,
+      goal,
+      status,
+      startedAt: missionStartedAt,
+      completedAt: hasPendingApproval ? '' : completedAt ?? '',
+      approvalRequired: hasPendingApproval ? true : currentAgencyMission?.approvalStatus === 'pending',
+      approvalStatus: hasPendingApproval ? 'pending' : currentAgencyMission?.approvalStatus ?? 'none',
+      orchestratorSessionKey: orchestratorSessionKey ?? '',
+      workerCount: workers.length,
+      workerLabels: workers.map((worker) => worker.label),
+      outputPath: outputPath ?? '',
+      summary:
+        hasPendingApproval
+          ? (currentAgencyMission?.summary || planText || streamText || 'Mission is waiting for manager approval.').slice(0, 3000)
+          : phase === 'complete'
+          ? buildCompleteSummary({
+              goal,
+              streamError,
+              missionStartedAt,
+              completedAt: completedAt ?? new Date().toISOString(),
+              totalWorkers: workers.length,
+              totalTokens: workers.reduce((sum, worker) => sum + worker.totalTokens, 0),
+              outputPath,
+            })
+          : (planText || streamText || 'Mission in progress.').slice(0, 3000),
+      error: streamError ?? '',
+      streamText: streamText.slice(0, 8000),
+      workerOutputs: Object.fromEntries(
+        Object.entries(workerOutputs).map(([key, value]) => [key, value.slice(0, 4000)]),
+      ),
+      jobId:
+        orchestratorSessionKey?.startsWith('cron_')
+          ? orchestratorSessionKey.replace(/^cron_/, '').split('_')[0] || ''
+          : '',
+    }
+    if (tasks.length > 0) {
+      patch.tasks = tasks
+    }
+
+    const snapshot = JSON.stringify(patch)
+    if (snapshot === agencyMissionSnapshotRef.current) return
+    agencyMissionSnapshotRef.current = snapshot
+    void updateAgencyMissionRecord(agencyMissionId, patch, 'manager').catch(() => {
+      agencyMissionSnapshotRef.current = ''
+    })
+  }, [
+    agencyMissionId,
+    phase,
+    goal,
+    missionStartedAt,
+    completedAt,
+    orchestratorSessionKey,
+    workers,
+    workerOutputs,
+    tasks,
+    streamText,
+    planText,
+    streamError,
+    isPaused,
+    currentAgencyMission,
+  ])
 
   const dismissTimeoutWarning = () => {
     lastActivityAtRef.current = Date.now()
@@ -1038,6 +1374,7 @@ export function useConductorGateway() {
     clearPersistedMission()
     setPhase('idle')
     setGoal('')
+    setAgencyMissionId(null)
     setOrchestratorSessionKey(null)
     setStreamText('')
     setPlanText('')
@@ -1059,6 +1396,7 @@ export function useConductorGateway() {
     setSelectedHistoryEntry(null)
     seenToolCallRef.current = false
     historySavedRef.current = false
+    agencyMissionSnapshotRef.current = ''
   }
 
   const sendMission = useMutation({
@@ -1070,6 +1408,7 @@ export function useConductorGateway() {
       lastWorkerSnapshotRef.current = ''
       setTimeoutWarning(false)
       setGoal(trimmed)
+      setAgencyMissionId(null)
       setOrchestratorSessionKey(null)
       setStreamText('')
       setPlanText('')
@@ -1087,14 +1426,21 @@ export function useConductorGateway() {
       setSelectedHistoryEntry(null)
       seenToolCallRef.current = false
       historySavedRef.current = false
-      setMissionStartedAt(new Date().toISOString())
+      const startedAt = new Date().toISOString()
+      const agencyRecord = await createAgencyMissionRecord({
+        goal: trimmed,
+        startedAt,
+        status: 'running',
+      })
+      setAgencyMissionId(agencyRecord.mission.id)
+      setMissionStartedAt(startedAt)
       setPhase('decomposing')
 
       // Spawn a dedicated orchestrator session via the server
       const response = await fetch('/api/conductor-spawn', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ goal: trimmed, ...settings }),
+        body: JSON.stringify({ goal: trimmed, agencyMissionId: agencyRecord.mission.id, ...settings }),
       })
 
       if (!response.ok) {
@@ -1178,7 +1524,8 @@ export function useConductorGateway() {
   const resetSavedState = () => {
     clearMissionState()
     clearMissionHistoryStorage()
-    setMissionHistory([])
+    setLocalMissionHistory([])
+    setMissionHistory(agencyMissionHistory)
   }
 
   const pauseAgent = useMutation({
@@ -1244,6 +1591,7 @@ export function useConductorGateway() {
   return {
     phase,
     goal,
+    agencyMissionId,
     orchestratorSessionKey,
     streamText,
     planText,
@@ -1261,6 +1609,9 @@ export function useConductorGateway() {
     workers,
     activeWorkers,
     missionHistory,
+    agencyState: agencyStateQuery.data ?? null,
+    isAgencyLoading: agencyStateQuery.isLoading,
+    agencyError: agencyStateQuery.error,
     hasPersistedMission,
     selectedHistoryEntry,
     setSelectedHistoryEntry,
@@ -1279,5 +1630,6 @@ export function useConductorGateway() {
     retryMission,
     refreshWorkers: sessionsQuery.refetch,
     isRefreshingWorkers: sessionsQuery.isFetching,
+    refreshAgencyState: agencyStateQuery.refetch,
   }
 }

@@ -38,12 +38,14 @@ function isTextFile(path: string) {
 
 type FilePreviewDialogProps = {
   path: string | null
+  source?: 'workspace' | 'agency'
   onClose: () => void
   onSaved: () => void
 }
 
 export default function FilePreviewDialog({
   path,
+  source = 'workspace',
   onClose,
   onSaved,
 }: FilePreviewDialogProps) {
@@ -58,6 +60,8 @@ export default function FilePreviewDialog({
     const ext = getExtension(path)
     return LANGUAGE_MAP[ext] || 'plaintext'
   }, [path])
+  const canEdit = source === 'workspace'
+  const readEndpoint = source === 'agency' ? '/api/agency-file' : '/api/files'
 
   const loadFile = useCallback(async () => {
     if (!path) return
@@ -65,7 +69,7 @@ export default function FilePreviewDialog({
     setError(null)
     try {
       const res = await fetch(
-        `/api/files?action=read&path=${encodeURIComponent(path)}`,
+        `${readEndpoint}?action=read&path=${encodeURIComponent(path)}`,
       )
       if (!res.ok) throw new Error('Failed to read file')
       const data = (await res.json()) as {
@@ -85,14 +89,14 @@ export default function FilePreviewDialog({
     } finally {
       setLoading(false)
     }
-  }, [path])
+  }, [path, readEndpoint])
 
   useEffect(() => {
     if (path) void loadFile()
   }, [loadFile, path])
 
   const handleSave = useCallback(async () => {
-    if (!path) return
+    if (!path || !canEdit) return
     await fetch('/api/files', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -104,7 +108,7 @@ export default function FilePreviewDialog({
     })
     setDirty(false)
     onSaved()
-  }, [content, onSaved, path])
+  }, [canEdit, content, onSaved, path])
 
   return (
     <DialogRoot
@@ -119,7 +123,7 @@ export default function FilePreviewDialog({
             {path || 'File'}
           </DialogTitle>
           <div className="flex gap-2">
-            {isTextFile(path || '') ? (
+            {canEdit && isTextFile(path || '') ? (
               <Button onClick={handleSave} disabled={!dirty || loading}>
                 Save
               </Button>
