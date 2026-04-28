@@ -453,7 +453,13 @@ const config = defineConfig(({ mode, command }) => {
       watch: {
         // Exclude generated route tree — TanStack Router's file watcher
         // detects its own output as a change → infinite regeneration loop
-        ignored: ['**/routeTree.gen.ts'],
+        // Exclude skill templates. Hermes can touch files under skills/**/templates
+        // during normal usage, and Vite treats those writes as source changes,
+        // causing full page reloads while the app is open.
+        ignored: [
+          '**/routeTree.gen.ts',
+          '**/skills/**/templates/**',
+        ],
       },
       proxy: {
         // WebSocket proxy: clients connect to /ws-hermes on the Hermes Workspace

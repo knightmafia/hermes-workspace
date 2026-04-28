@@ -12,6 +12,13 @@ type CronRunsResponse = {
   runs?: Array<Record<string, unknown>>
 }
 
+function asRecordArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return []
+  return value.filter(function isRecord(item): item is Record<string, unknown> {
+    return Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  })
+}
+
 type ToggleCronPayload = {
   ok?: boolean
   enabled?: boolean
@@ -95,6 +102,20 @@ function normalizeTimestamp(value: unknown): string | null {
     return new Date(milliseconds).toISOString()
   }
   return null
+}
+
+function normalizeSchedule(value: unknown): string {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim()
+  }
+  const record = asRecord(value)
+  const display = readStringCandidate(record.display, record.expr)
+  if (display) return display
+  if (record.kind === 'interval') {
+    const minutes = readNumberCandidate(record.minutes)
+    if (typeof minutes === 'number') return `every ${minutes}m`
+  }
+  return '* * * * *'
 }
 
 function normalizeRun(row: Record<string, unknown>, index: number): CronRun {
@@ -184,10 +205,7 @@ function normalizeJob(row: Record<string, unknown>, index: number): CronJob {
       (typeof row.name === 'string' && row.name) ||
       (typeof row.title === 'string' && row.title) ||
       `Cron Job ${index + 1}`,
-    schedule:
-      (typeof row.schedule === 'string' && row.schedule) ||
-      (typeof row.cron === 'string' && row.cron) ||
-      '* * * * *',
+    schedule: normalizeSchedule(row.schedule ?? row.cron),
     enabled: Boolean(row.enabled),
     payload: row.payload,
     deliveryConfig: row.deliveryConfig,
@@ -252,8 +270,10 @@ export async function fetchCronJobs(): Promise<Array<CronJob>> {
     throw new Error(await readError(response))
   }
 
-  const payload = await readJsonAndCheckOk<CronJobsResponse>(response)
-  const rows = Array.isArray(payload.jobs) ? payload.jobs : []
+  const payload = await readJsonAndCheckOk<CronJobsResponse | Array<Record<string, unknown>>>(response)
+  const rows = Array.isArray(payload)
+    ? asRecordArray(payload)
+    : asRecordArray(payload.jobs)
   return rows.map(function mapJob(job, index) {
     return normalizeJob(job, index)
   })
@@ -267,8 +287,10 @@ export async function fetchCronRuns(jobId: string): Promise<Array<CronRun>> {
     throw new Error(await readError(response))
   }
 
-  const payload = await readJsonAndCheckOk<CronRunsResponse>(response)
-  const rows = Array.isArray(payload.runs) ? payload.runs : []
+  const payload = await readJsonAndCheckOk<CronRunsResponse | Array<Record<string, unknown>>>(response)
+  const rows = Array.isArray(payload)
+    ? asRecordArray(payload)
+    : asRecordArray(payload.runs)
   return rows.map(function mapRun(run, index) {
     return normalizeRun(run, index)
   })

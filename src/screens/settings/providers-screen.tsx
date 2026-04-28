@@ -1046,9 +1046,11 @@ function ActiveModelCard({
       )
 
       const patch: Record<string, unknown> = {
-        model: normalizedPrimaryModel,
-        provider: primaryConfig.provider,
-        base_url: primaryConfig.baseUrl.trim(),
+        model: {
+          default: normalizedPrimaryModel,
+          provider: primaryConfig.provider,
+          base_url: primaryConfig.baseUrl.trim(),
+        },
         stream_stale_timeout: streamStaleTimeout,
         stream_read_timeout: streamReadTimeout,
         performance: {

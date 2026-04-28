@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { Cancel01Icon, Settings01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AgentProgress } from '@/components/agent-view/agent-progress'
@@ -10,31 +10,33 @@ const ChatScreen = lazy(() =>
   import('@/screens/chat/chat-screen').then((m) => ({ default: m.ChatScreen })),
 )
 
-const ORCHESTRATOR_NAME_KEY = 'operations:orchestrator:name'
 const DEFAULT_ORCHESTRATOR_NAME = 'Main Agent'
 
 export function OrchestratorCard({
   totalAgents,
+  orchestratorName,
+  onSaveName,
 }: {
   totalAgents: number
+  orchestratorName?: string
+  onSaveName?: (name: string) => void
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [orchestratorName, setOrchestratorName] = useState(() => {
-    if (typeof window === 'undefined') return DEFAULT_ORCHESTRATOR_NAME
-    return window.localStorage.getItem(ORCHESTRATOR_NAME_KEY) || DEFAULT_ORCHESTRATOR_NAME
-  })
-  const [draftName, setDraftName] = useState(orchestratorName)
+  const [draftName, setDraftName] = useState(orchestratorName || DEFAULT_ORCHESTRATOR_NAME)
+
+  useEffect(() => {
+    setDraftName(orchestratorName || DEFAULT_ORCHESTRATOR_NAME)
+  }, [orchestratorName])
 
   const openSettings = () => {
-    setDraftName(orchestratorName)
+    setDraftName(orchestratorName || DEFAULT_ORCHESTRATOR_NAME)
     setSettingsOpen(true)
   }
 
   const saveSettings = () => {
     const nextName = draftName.trim() || DEFAULT_ORCHESTRATOR_NAME
-    window.localStorage.setItem(ORCHESTRATOR_NAME_KEY, nextName)
-    setOrchestratorName(nextName)
     setDraftName(nextName)
+    onSaveName?.(nextName)
     setSettingsOpen(false)
   }
 
@@ -45,7 +47,7 @@ export function OrchestratorCard({
           <div className="relative flex min-h-8 w-full items-center justify-center">
             <h2 className="text-base font-semibold text-[var(--theme-text)]">
               <span className="inline-flex items-center justify-center gap-2">
-                <span>{orchestratorName}</span>
+                <span>{orchestratorName || DEFAULT_ORCHESTRATOR_NAME}</span>
                 <span
                   className={cn(
                     'h-2.5 w-2.5 rounded-full bg-emerald-500',

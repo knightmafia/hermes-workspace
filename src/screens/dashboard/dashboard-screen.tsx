@@ -18,6 +18,8 @@ import { useFeatureAvailable } from '@/hooks/use-feature-available'
 import { cn } from '@/lib/utils'
 import { openHamburgerMenu } from '@/components/mobile-hamburger-menu'
 import { applyTheme, useSettingsStore } from '@/hooks/use-settings'
+import { fetchAgencyHeartbeats, type AgencyHeartbeatsState } from '@/lib/agency-heartbeats-api'
+import { fetchAgencyState, type AgencyState } from '@/lib/waymaker-agency-api'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Moon02Icon, Sun02Icon } from '@hugeicons/core-free-icons'
 
@@ -666,6 +668,290 @@ function SessionRow({
   )
 }
 
+function formatRelativeDateTime(value?: string): string {
+  if (!value) return '—'
+  const ms = new Date(value).getTime()
+  if (!Number.isFinite(ms)) return '—'
+  return timeAgo(ms / 1000)
+}
+
+function missionStatusMeta(
+  status: string,
+  palette: ReturnType<typeof readDashboardPalette>,
+): { label: string; color: string } {
+  switch (status) {
+    case 'running':
+      return { label: 'Running', color: palette.success }
+    case 'paused':
+      return { label: 'Paused', color: palette.warning }
+    case 'completed':
+      return { label: 'Completed', color: palette.accent }
+    case 'failed':
+      return { label: 'Failed', color: palette.danger }
+    case 'blocked':
+      return { label: 'Blocked', color: palette.danger }
+    case 'needs-approval':
+      return { label: 'Needs Approval', color: palette.warning }
+    default:
+      return { label: 'Proposed', color: palette.muted }
+  }
+}
+
+function AgencyOverviewCard({
+  agency,
+  heartbeats,
+  palette,
+}: {
+  agency: AgencyState
+  heartbeats: AgencyHeartbeatsState | null
+  palette: ReturnType<typeof readDashboardPalette>
+}) {
+  const running = agency.missions.filter((mission) => mission.status === 'running').length
+  const blocked = agency.missions.filter(
+    (mission) => mission.status === 'blocked' || mission.status === 'needs-approval',
+  ).length
+  const completed = agency.missions.filter((mission) => mission.status === 'completed').length
+  const approvals = agency.queues.approvals.length
+  const stale = agency.queues.stale.length
+  const reviews = agency.reviews.length
+  const recentMissions = [...agency.missions]
+    .sort((left, right) => {
+      const leftTs = Date.parse(left.startedAt || '') || 0
+      const rightTs = Date.parse(right.startedAt || '') || 0
+      return rightTs - leftTs
+    })
+    .slice(0, 4)
+  const attentionItems = [
+    ...agency.queues.approvals.slice(0, 2).map((item) => ({
+      key: `approval:${item.path}`,
+      label: item.taskTitle ? `${item.missionTitle} / ${item.taskTitle}` : item.missionTitle,
+      detail: item.detail,
+      color: palette.warning,
+    })),
+    ...agency.queues.stale.slice(0, 2).map((item) => ({
+      key: `stale:${item.path}`,
+      label: item.taskTitle ? `${item.missionTitle} / ${item.taskTitle}` : item.missionTitle,
+      detail: item.detail,
+      color: palette.danger,
+    })),
+  ].slice(0, 4)
+  const dailyReview = agency.dailyReview
+  const topScorecards = agency.scorecards.slice(0, 3)
+  const reviewSections = [
+    {
+      title: 'Top Priorities',
+      items: dailyReview.topPriorities,
+      color: palette.accent,
+    },
+    {
+      title: 'Risks',
+      items: dailyReview.risks,
+      color: palette.danger,
+    },
+    {
+      title: 'Required Decisions',
+      items: dailyReview.requiredDecisions,
+      color: palette.warning,
+    },
+  ]
+  const installedHeartbeats = heartbeats?.jobs.filter((job) => job.installed).length ?? 0
+  const totalHeartbeats = heartbeats?.jobs.length ?? 0
+
+  return (
+    <GlassCard
+      title="Agency"
+      titleRight={<span className="text-[10px] text-muted">{agency.agents.length} agents</span>}
+      accentColor={palette.warning}
+    >
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Running</div>
+          <div className="mt-1 text-lg font-semibold text-ink">{running}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Blocked</div>
+          <div className="mt-1 text-lg font-semibold text-ink">{blocked}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Done</div>
+          <div className="mt-1 text-lg font-semibold text-ink">{completed}</div>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Approvals</div>
+          <div className="mt-1 text-lg font-semibold text-ink">{approvals}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Stale</div>
+          <div className="mt-1 text-lg font-semibold text-ink">{stale}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Reviews</div>
+          <div className="mt-1 text-lg font-semibold text-ink">{reviews}</div>
+        </div>
+      </div>
+
+      <div className="mt-2 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Heartbeats</div>
+          <div className="text-[10px] text-muted">
+            {heartbeats ? `${installedHeartbeats}/${totalHeartbeats} installed` : 'Loading…'}
+          </div>
+        </div>
+        {heartbeats ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {heartbeats.jobs.map((job) => (
+              <span
+                key={job.key}
+                className="inline-flex rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]"
+                style={{
+                  color: job.needsUpdate ? palette.warning : job.installed ? palette.success : palette.warning,
+                  background: alpha(job.needsUpdate ? palette.warning : job.installed ? palette.success : palette.warning, 0.14),
+                  border: `1px solid ${alpha(job.needsUpdate ? palette.warning : job.installed ? palette.success : palette.warning, 0.28)}`,
+                }}
+              >
+                {job.needsUpdate ? `${job.key} drift` : job.key}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {recentMissions.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-5 text-center text-xs text-muted">
+            No agency missions yet.
+          </div>
+        ) : (
+          recentMissions.map((mission) => {
+            const meta = missionStatusMeta(mission.status, palette)
+            return (
+              <div
+                key={mission.id}
+                className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-medium text-ink">{mission.title}</div>
+                    <div className="mt-1 text-[10px] text-muted">
+                      {formatRelativeDateTime(mission.completedAt || mission.startedAt)}
+                    </div>
+                  </div>
+                  <span
+                    className="inline-flex rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]"
+                    style={{
+                      color: meta.color,
+                      background: alpha(meta.color, 0.14),
+                      border: `1px solid ${alpha(meta.color, 0.28)}`,
+                    }}
+                  >
+                    {meta.label}
+                  </span>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Needs Attention</div>
+        {attentionItems.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-4 text-center text-xs text-muted">
+            No approval or stale items right now.
+          </div>
+        ) : (
+          attentionItems.map((item) => (
+            <div
+              key={item.key}
+              className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: item.color }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium text-ink">{item.label}</div>
+                  <div className="mt-1 text-[10px] text-muted">{item.detail}</div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Top Operators</div>
+          <div className="text-[10px] text-muted">{agency.scorecards.length} tracked</div>
+        </div>
+        {topScorecards.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-4 text-center text-xs text-muted">
+            No scorecards yet.
+          </div>
+        ) : (
+          topScorecards.map((scorecard) => (
+            <div
+              key={scorecard.agentId}
+              className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-medium text-ink">{scorecard.name}</div>
+                  <div className="mt-1 text-[10px] text-muted">
+                    {scorecard.completedTasks} complete · {scorecard.reviewPasses} pass · {scorecard.requeueCount} requeue
+                  </div>
+                </div>
+                <div className="text-right text-[10px] text-muted">
+                  {scorecard.averageCycleHours > 0 ? `${scorecard.averageCycleHours}h avg` : '—'}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted">Daily Review</div>
+          <div className="text-[10px] text-muted">{formatRelativeDateTime(dailyReview.generatedAt)}</div>
+        </div>
+        <div className="space-y-2">
+          {reviewSections.map((section) => (
+            <div
+              key={section.title}
+              className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card2)] px-3 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: section.color }}
+                />
+                <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+                  {section.title}
+                </div>
+              </div>
+              {section.items.length === 0 ? (
+                <div className="mt-2 text-[10px] text-muted">Nothing critical right now.</div>
+              ) : (
+                <div className="mt-2 space-y-1">
+                  {section.items.map((item) => (
+                    <div key={`${section.title}:${item}`} className="text-[11px] text-ink">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </GlassCard>
+  )
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────
 
 export function DashboardScreen() {
@@ -699,8 +985,22 @@ export function DashboardScreen() {
     refetchInterval: 30_000,
     enabled: sessionsAvailable,
   })
+  const agencyQuery = useQuery({
+    queryKey: ['dashboard', 'agency-state'],
+    queryFn: fetchAgencyState,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  })
+  const agencyHeartbeatsQuery = useQuery({
+    queryKey: ['dashboard', 'agency-heartbeats'],
+    queryFn: fetchAgencyHeartbeats,
+    staleTime: 10_000,
+    refetchInterval: 60_000,
+  })
 
   const sessions = (sessionsQuery.data ?? []) as HermesSession[]
+  const agency = agencyQuery.data ?? null
+  const agencyHeartbeats = agencyHeartbeatsQuery.data ?? null
 
   const stats = useMemo(() => {
     let totalMessages = 0,
@@ -837,7 +1137,7 @@ export function DashboardScreen() {
 
       {/* ── Metrics Row ── */}
       {sessionsAvailable ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <MetricTile
             label="Sessions"
             value={formatNumber(stats.totalSessions)}
@@ -862,6 +1162,17 @@ export function DashboardScreen() {
             sub={costEstimate}
             icon="⚡"
             accentColor={palette.accentSecondary}
+          />
+          <MetricTile
+            label="Missions"
+            value={formatNumber(agency?.missions.length ?? 0)}
+            sub={
+              agency
+                ? `${agency.missions.filter((mission) => mission.status === 'running').length} active`
+                : 'agency offline'
+            }
+            icon="🗂️"
+            accentColor={palette.warning}
           />
         </div>
       ) : (
@@ -890,6 +1201,14 @@ export function DashboardScreen() {
           <SkillsWidget palette={palette} />
         </div>
       </div>
+
+      {agency ? (
+        <AgencyOverviewCard
+          agency={agency}
+          heartbeats={agencyHeartbeats}
+          palette={palette}
+        />
+      ) : null}
 
       {/* ── Recent Sessions (minimal) ── */}
       {sessionsAvailable ? (

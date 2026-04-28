@@ -1227,9 +1227,11 @@ function HermesConfigSection({
             disabled={saving}
             onClick={() => {
               const configUpdate: Record<string, unknown> = {
-                model: modelInput.trim(),
-                provider: providerInput.trim(),
-                base_url: baseUrlInput.trim() || null,
+                model: {
+                  default: modelInput.trim(),
+                  provider: providerInput.trim(),
+                  base_url: baseUrlInput.trim() || null,
+                },
               }
               void saveConfig({ config: configUpdate })
             }}

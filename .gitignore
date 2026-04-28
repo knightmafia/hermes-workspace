@@ -2,6 +2,9 @@
 node_modules
 .pnp
 .pnp.js
+linked/
+waymaker-agency
+waymaker-agency/
 
 # Build outputs
 dist

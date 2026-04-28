@@ -345,11 +345,13 @@ function HermesContent() {
     setActiveProvider(providerId)
     if (model) {
       setActiveModel(model)
-      save({ config: { model, provider: providerId } })
+      save({
+        config: { model: { default: model, provider: providerId } },
+      })
     } else {
       // Switching provider without a model — fetch models and pick the first one
       fetchModelsForProvider(providerId)
-      save({ config: { provider: providerId } })
+      save({ config: { model: { provider: providerId } } })
     }
   }
 
