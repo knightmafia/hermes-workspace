@@ -85,6 +85,7 @@ async function isHermesAgentHealthy(port = 8642): Promise<boolean> {
 const config = defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const hermesApiUrl = env.HERMES_API_URL?.trim() || 'http://127.0.0.1:8642'
+  const hciBackendUrl = env.HCI_BACKEND_URL?.trim() || 'http://127.0.0.1:10272'
 
   // Hermes Agent auto-start state
   let hermesAgentChild: ChildProcess | null = null
@@ -478,6 +479,18 @@ const config = defineConfig(({ mode, command }) => {
           configure: (proxy) => {
             proxy.on('proxyRes', (_proxyRes) => {
               // Strip iframe-blocking headers so we can embed
+              delete _proxyRes.headers['x-frame-options']
+              delete _proxyRes.headers['content-security-policy']
+            })
+          },
+        },
+        '/hci-ui': {
+          target: hciBackendUrl,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/hci-ui/, ''),
+          ws: true,
+          configure: (proxy) => {
+            proxy.on('proxyRes', (_proxyRes) => {
               delete _proxyRes.headers['x-frame-options']
               delete _proxyRes.headers['content-security-policy']
             })

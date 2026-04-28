@@ -67,6 +67,13 @@ const NAV_ITEMS = [
     match: (p: string) => p.startsWith('/operations'),
   },
   {
+    id: 'ops-console',
+    label: 'Ops Console',
+    icon: Settings01Icon,
+    to: '/ops-console',
+    match: (p: string) => p.startsWith('/ops-console'),
+  },
+  {
     id: 'memory',
     label: 'Memory',
     icon: BrainIcon,

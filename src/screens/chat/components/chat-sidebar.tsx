@@ -563,6 +563,7 @@ function ChatSidebarComponent({
   const isTasksActive = pathname === '/tasks'
   const isConductorActive = pathname === '/conductor'
   const isOperationsActive = pathname === '/operations'
+  const isOpsConsoleActive = pathname.startsWith('/ops-console')
   const mainRoutes = ['/chat', '/new', '/files', '/terminal']
   const knowledgeRoutes = ['/memory', '/skills']
   const systemRoutes = ['/settings', '/logs']
@@ -814,6 +815,13 @@ function ChatSidebarComponent({
       icon: UserGroupIcon,
       label: 'Operations',
       active: isOperationsActive,
+    },
+    {
+      kind: 'link',
+      to: '/ops-console',
+      icon: Settings01Icon,
+      label: 'Ops Console',
+      active: isOpsConsoleActive,
     },
   ]
 
