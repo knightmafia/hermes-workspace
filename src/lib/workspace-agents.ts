@@ -1,5 +1,7 @@
 import { workspaceRequestJson } from '@/lib/workspace-checkpoints'
 
+export type WorkspaceAvatarMode = 'builtin' | 'portrait'
+
 export type WorkspaceAgentDirectory = {
   id: string
   name: string
@@ -9,6 +11,8 @@ export type WorkspaceAgentDirectory = {
   provider: string
   status: 'online' | 'away' | 'offline'
   avatar: string
+  avatar_url: string | null
+  avatar_mode: WorkspaceAvatarMode
   avatar_tone: 'accent' | 'green' | 'yellow' | 'primary'
   description: string
   system_prompt: string
@@ -45,7 +49,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value : null
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function asNumber(value: unknown): number {
@@ -71,6 +77,8 @@ function normalizeAgent(value: unknown): WorkspaceAgentDirectory | null {
   const capabilities = asRecord(record?.capabilities)
   const status = asString(record?.status)
   const avatarTone = asString(record?.avatar_tone)
+  const avatarUrl = asString(record?.avatar_url)
+  const avatarModeRaw = asString(record?.avatar_mode)
 
   const id = asString(record?.id)
   const name = asString(record?.name)
@@ -91,6 +99,11 @@ function normalizeAgent(value: unknown): WorkspaceAgentDirectory | null {
         ? status
         : 'offline',
     avatar: asString(record?.avatar) ?? '🤖',
+    avatar_url: avatarUrl,
+    avatar_mode:
+      avatarModeRaw === 'portrait' || (avatarUrl && avatarModeRaw !== 'builtin')
+        ? 'portrait'
+        : 'builtin',
     avatar_tone:
       avatarTone === 'accent' ||
       avatarTone === 'green' ||

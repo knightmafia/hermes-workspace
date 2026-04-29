@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { AgentAvatarDisplay } from './agent-avatar'
 import type { HubTask } from './task-board'
 
 function formatRelativeTime(ts: number): string {
@@ -61,6 +62,8 @@ export type TeamMember = {
   id: string
   name: string
   avatar?: number
+  avatar_url?: string | null
+  avatar_mode?: 'builtin' | 'portrait'
   modelId: string
   roleDescription: string
   goal: string        // What this agent is trying to achieve
@@ -99,7 +102,7 @@ type TeamPanelProps = {
   onAddAgent: () => void
   onUpdateAgent: (
     agentId: string,
-    updates: Partial<Pick<TeamMember, 'modelId' | 'roleDescription' | 'goal' | 'backstory'>>,
+    updates: Partial<Pick<TeamMember, 'modelId' | 'roleDescription' | 'goal' | 'backstory' | 'avatar_url' | 'avatar_mode'>>,
   ) => void
   onSelectAgent?: (agentId?: string) => void
 }
@@ -118,6 +121,8 @@ const MODEL_BADGE_COLOR: Record<ModelPresetId, string> = {
 
 const DEFAULT_MODEL_BADGE_COLOR =
   'bg-neutral-100 text-neutral-700'
+
+const APPROVED_PORTRAIT_ASSET_PATH = '/avatars/hermes-coo-approved.jpg'
 
 type SessionDotState = 'active' | 'idle' | 'stale' | 'dead' | 'spawning' | 'none'
 
@@ -307,24 +312,35 @@ export function TeamPanel({
 
                   {/* Name + badges */}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-primary-900 dark:text-neutral-100">
-                      {agent.name}
-                    </p>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          'rounded-full px-2 py-0.5 text-[10px] font-medium',
-                          getModelBadgeColor(agent.modelId),
-                        )}
-                      >
-                        {modelLabel}
-                      </span>
-                      <span className="text-[10px] uppercase tracking-wide text-primary-500">
-                        {agent.status}
-                      </span>
-                      <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-neutral-800 dark:text-neutral-300">
-                        {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
-                      </span>
+                    <div className="flex items-start gap-2">
+                      <AgentAvatarDisplay
+                        member={agent}
+                        fallbackIndex={team.indexOf(agent)}
+                        color="#f97316"
+                        size={32}
+                        alt={`${agent.name} avatar`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-primary-900 dark:text-neutral-100">
+                          {agent.name}
+                        </p>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              'rounded-full px-2 py-0.5 text-[10px] font-medium',
+                              getModelBadgeColor(agent.modelId),
+                            )}
+                          >
+                            {modelLabel}
+                          </span>
+                          <span className="text-[10px] uppercase tracking-wide text-primary-500">
+                            {agent.status}
+                          </span>
+                          <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-neutral-800 dark:text-neutral-300">
+                            {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                     {agentSessionEntry?.lastSeen ? (
                       <p className="mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
@@ -424,6 +440,67 @@ export function TeamPanel({
                       ) : null}
                     </select>
                   </label>
+
+                  <label className="block">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-primary-500">
+                        Portrait URL
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onUpdateAgent(agent.id, {
+                            avatar_url: APPROVED_PORTRAIT_ASSET_PATH,
+                            avatar_mode: 'portrait',
+                          })
+                        }}
+                        className="rounded-full border border-primary-200 bg-white px-2 py-0.5 text-[10px] font-medium text-primary-600 transition-colors hover:border-accent-400 hover:text-accent-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
+                      >
+                        Use approved portrait
+                      </button>
+                    </div>
+                    <input
+                      type="url"
+                      value={agent.avatar_url ?? ''}
+                      onChange={(event) => {
+                        const nextUrl = event.target.value.trim()
+                        onUpdateAgent(agent.id, {
+                          avatar_url: nextUrl || null,
+                          avatar_mode: nextUrl ? 'portrait' : 'builtin',
+                        })
+                      }}
+                      placeholder="https://.../portrait.jpg or /avatars/hermes-coo-approved.jpg"
+                      className="w-full rounded-md border border-primary-200 bg-white px-2 py-1.5 text-xs text-primary-900 outline-none ring-accent-400 focus:ring-1 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
+                    />
+                    <p className="mt-1 text-[10px] text-primary-400 dark:text-neutral-500">
+                      Leave blank to use the built-in avatar set.
+                    </p>
+                  </label>
+
+                  <div className="rounded-lg border border-primary-200 bg-primary-50/50 p-2 dark:border-neutral-700 dark:bg-neutral-900/40">
+                    <span className="mb-2 block text-[10px] font-semibold uppercase tracking-wide text-primary-500">
+                      Portrait Preview
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <AgentAvatarDisplay
+                        member={agent}
+                        fallbackIndex={team.indexOf(agent)}
+                        color="#f97316"
+                        size={48}
+                        alt={`${agent.name} portrait preview`}
+                        activityState="idle"
+                        animate
+                      />
+                      <div className="min-w-0 text-[10px] text-primary-500 dark:text-neutral-400">
+                        <p className="font-medium text-primary-700 dark:text-neutral-200">
+                          {agent.avatar_url ? 'Portrait mode active' : 'Built-in avatar active'}
+                        </p>
+                        <p className="mt-0.5 truncate">
+                          {agent.avatar_url || 'No custom portrait URL set'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
 
                   <label className="block">
                     <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-primary-500">
