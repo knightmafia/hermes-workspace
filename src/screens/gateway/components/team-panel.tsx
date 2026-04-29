@@ -122,7 +122,7 @@ const MODEL_BADGE_COLOR: Record<ModelPresetId, string> = {
 const DEFAULT_MODEL_BADGE_COLOR =
   'bg-neutral-100 text-neutral-700'
 
-const APPROVED_PORTRAIT_ASSET_PATH = '/avatars/hermes-coo-approved.jpg'
+const APPROVED_PORTRAIT_ASSET_PATH = '/avatars/eric-avatar-cropped.jpg'
 
 type SessionDotState = 'active' | 'idle' | 'stale' | 'dead' | 'spawning' | 'none'
 
