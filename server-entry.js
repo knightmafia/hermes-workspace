@@ -76,10 +76,16 @@ async function proxyHciRequest(req, res) {
     req.url || '/',
     `http://${req.headers.host || 'localhost'}`,
   )
-  if (!incomingUrl.pathname.startsWith('/hci-ui')) return false
+  const referer = req.headers.referer || req.headers.referrer || ''
+  const isHciPath = incomingUrl.pathname.startsWith('/hci-ui')
+  const isHciApiRequest =
+    incomingUrl.pathname.startsWith('/api/') && referer.includes('/hci-ui')
+  if (!isHciPath && !isHciApiRequest) return false
 
   const targetUrl = new URL(hciBackendUrl)
-  targetUrl.pathname = incomingUrl.pathname.replace(/^\/hci-ui/, '') || '/'
+  targetUrl.pathname = isHciPath
+    ? incomingUrl.pathname.replace(/^\/hci-ui/, '') || '/'
+    : incomingUrl.pathname
   targetUrl.search = incomingUrl.search
 
   try {
