@@ -7,7 +7,7 @@ cd "$ROOT"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export PORT="${PORT:-3000}"
-export HOST="${HOST:-0.0.0.0}"
+export HOST="${HOST:-127.0.0.1}"
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
 
 # Launchd should manage a single stable foreground server here.
