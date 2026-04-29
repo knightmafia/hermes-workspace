@@ -8,6 +8,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const CLIENT_DIR = join(__dirname, 'dist', 'client')
 
 const port = parseInt(process.env.PORT || '3000', 10)
+const hciBackendUrl = process.env.HCI_BACKEND_URL || 'http://127.0.0.1:10272'
 // Default HOST to localhost-only. Operators who want the workspace reachable
 // on a LAN / Tailscale / public surface must opt in explicitly with
 // HOST=0.0.0.0 *and* set HERMES_PASSWORD (enforced below). See #122.
@@ -70,6 +71,64 @@ const MIME_TYPES = {
   '.webmanifest': 'application/manifest+json',
 }
 
+async function proxyHciRequest(req, res) {
+  const incomingUrl = new URL(
+    req.url || '/',
+    `http://${req.headers.host || 'localhost'}`,
+  )
+  if (!incomingUrl.pathname.startsWith('/hci-ui')) return false
+
+  const targetUrl = new URL(hciBackendUrl)
+  targetUrl.pathname = incomingUrl.pathname.replace(/^\/hci-ui/, '') || '/'
+  targetUrl.search = incomingUrl.search
+
+  try {
+    const headers = new Headers()
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!value) continue
+      if (key.toLowerCase() === 'host') continue
+      headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+    }
+
+    let body = null
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      body = await new Promise((resolve) => {
+        const chunks = []
+        req.on('data', (chunk) => chunks.push(chunk))
+        req.on('end', () => resolve(Buffer.concat(chunks)))
+      })
+    }
+
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body,
+      duplex: body ? 'half' : undefined,
+    })
+
+    const responseHeaders = Object.fromEntries(response.headers.entries())
+    delete responseHeaders['x-frame-options']
+    delete responseHeaders['content-security-policy']
+    delete responseHeaders['content-length']
+
+    res.writeHead(response.status, responseHeaders)
+    if (response.body) {
+      const reader = response.body.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        res.write(value)
+      }
+    }
+    res.end()
+  } catch (err) {
+    console.error('HCI proxy error:', err)
+    res.writeHead(502, { 'Content-Type': 'text/plain' })
+    res.end('Hermes Control Interface is unavailable')
+  }
+  return true
+}
+
 async function tryServeStatic(req, res) {
   const url = new URL(
     req.url || '/',
@@ -112,6 +171,9 @@ async function tryServeStatic(req, res) {
 }
 
 const httpServer = createServer(async (req, res) => {
+  const proxiedHci = await proxyHciRequest(req, res)
+  if (proxiedHci) return
+
   // Try static files first (client assets)
   if (req.method === 'GET' || req.method === 'HEAD') {
     const served = await tryServeStatic(req, res)
