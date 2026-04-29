@@ -5,7 +5,7 @@
 import { cn } from '@/lib/utils'
 import type { AgentWorkingRow } from './agents-working-panel'
 import type { TeamMember } from './team-panel'
-import { AGENT_ACCENT_COLORS, AgentAvatar, resolveAgentAvatarIndex } from './agent-avatar'
+import { AGENT_ACCENT_COLORS, AgentAvatarDisplay } from './agent-avatar'
 import { getAgentStatusMeta, getOfficeModelLabel, OfficeView } from './office-view'
 
 export interface OverviewTabProps {
@@ -149,7 +149,13 @@ export function OverviewTab({
                           accent.avatar,
                         )}
                       >
-                        <AgentAvatar index={resolveAgentAvatarIndex(teamById.get(agent.id), index)} color={accent.hex} size={14} />
+                        <AgentAvatarDisplay
+                          member={teamById.get(agent.id)}
+                          fallbackIndex={index}
+                          color={accent.hex}
+                          size={14}
+                          alt={`${agent.name} avatar`}
+                        />
                       </span>
                     )
                   })}
@@ -199,6 +205,7 @@ export function OverviewTab({
               selectedOutputAgentId={selectedOutputAgentId}
               activeTemplateName={activeTemplateName}
               processType={processType}
+              agentDirectoryById={teamById}
             />
           ) : (
             <div
@@ -226,7 +233,13 @@ export function OverviewTab({
                             accent.avatar,
                           )}
                         >
-                          <AgentAvatar index={resolveAgentAvatarIndex(teamById.get(agent.id), index)} color={accent.hex} size={24} />
+                          <AgentAvatarDisplay
+                            member={teamById.get(agent.id)}
+                            fallbackIndex={index}
+                            color={accent.hex}
+                            size={24}
+                            alt={`${agent.name} avatar`}
+                          />
                         </div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-neutral-900">{agent.name}</p>

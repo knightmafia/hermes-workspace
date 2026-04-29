@@ -231,6 +231,12 @@ export function toTeamMember(value: unknown): TeamMember | null {
   const status = typeof row.status === 'string' ? row.status.trim() : 'available'
   const roleDescription = typeof row.roleDescription === 'string' ? row.roleDescription : ''
   const avatar = typeof row.avatar === 'number' ? row.avatar : undefined
+  const avatarUrl = typeof row.avatar_url === 'string' ? row.avatar_url.trim() : ''
+  const avatarMode = row.avatar_mode === 'builtin' || row.avatar_mode === 'portrait'
+    ? row.avatar_mode
+    : avatarUrl
+      ? 'portrait'
+      : undefined
   const goal = typeof row.goal === 'string' ? row.goal : ''
   const backstory = typeof row.backstory === 'string' ? row.backstory : ''
   const modelIdRaw = typeof row.modelId === 'string' ? row.modelId.trim() : 'auto'
@@ -242,6 +248,8 @@ export function toTeamMember(value: unknown): TeamMember | null {
     id,
     name,
     avatar,
+    avatar_url: avatarUrl || null,
+    avatar_mode: avatarMode,
     modelId,
     roleDescription,
     goal,

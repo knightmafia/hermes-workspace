@@ -1,3 +1,6 @@
+import { useEffect, type CSSProperties } from 'react'
+import type { OrchestratorState } from '@/hooks/use-orchestrator-state'
+
 type AgentAccentColor = {
   bar: string
   border: string
@@ -13,6 +16,73 @@ export const AGENT_AVATAR_COUNT = 10
 const LEGACY_AGENT_AVATAR_INDEX = new Map<string, number>(
   AGENT_AVATARS.map((avatar, index) => [avatar, index]),
 )
+
+const LIVE_AGENT_AVATAR_STYLE_ID = 'wm-live-agent-avatar-styles'
+
+function ensureLiveAgentAvatarStyles() {
+  if (typeof document === 'undefined') return
+  if (document.getElementById(LIVE_AGENT_AVATAR_STYLE_ID)) return
+  const style = document.createElement('style')
+  style.id = LIVE_AGENT_AVATAR_STYLE_ID
+  style.textContent = `
+    @keyframes wm-avatar-breathe {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-1px) scale(1.02); }
+    }
+    @keyframes wm-avatar-think {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-2px) scale(1.03); }
+    }
+    @keyframes wm-avatar-listen {
+      0%, 100% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(-1.5deg) scale(1.015); }
+    }
+    @keyframes wm-avatar-speak {
+      0%, 100% { transform: translateY(0) scale(1); }
+      35% { transform: translateY(-1px) scale(1.035); }
+      70% { transform: translateY(0) scale(0.992); }
+    }
+    @keyframes wm-avatar-error {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-1px); }
+      75% { transform: translateX(1px); }
+    }
+    @keyframes wm-avatar-ring-think {
+      0% { filter: saturate(1); }
+      50% { filter: saturate(1.2); }
+      100% { filter: saturate(1); }
+    }
+    @keyframes wm-avatar-ring-speak {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.035); }
+    }
+    @keyframes wm-avatar-drift {
+      0%, 100% { transform: translate3d(0,0,0) rotate(0deg); }
+      25% { transform: translate3d(-1%, 0.5%, 0) rotate(-0.6deg); }
+      50% { transform: translate3d(0.8%, -0.8%, 0) rotate(0.4deg); }
+      75% { transform: translate3d(-0.4%, 0.6%, 0) rotate(-0.35deg); }
+    }
+    @keyframes wm-avatar-blink {
+      0%, 45%, 100% { transform: scaleY(1); opacity: 0; }
+      46%, 49% { transform: scaleY(0.18); opacity: 0.92; }
+      50%, 53% { transform: scaleY(1); opacity: 0; }
+      78%, 80% { transform: scaleY(0.22); opacity: 0.88; }
+      81%, 100% { transform: scaleY(1); opacity: 0; }
+    }
+    @keyframes wm-avatar-mouth-idle {
+      0%, 100% { transform: scaleX(0.9) scaleY(0.75); opacity: 0.42; }
+      50% { transform: scaleX(1) scaleY(1); opacity: 0.58; }
+    }
+    @keyframes wm-avatar-mouth-speak {
+      0%, 100% { transform: scaleX(0.75) scaleY(0.45); opacity: 0.5; }
+      20% { transform: scaleX(1.05) scaleY(1.3); opacity: 0.9; }
+      40% { transform: scaleX(0.92) scaleY(0.62); opacity: 0.65; }
+      65% { transform: scaleX(1.18) scaleY(1.55); opacity: 0.95; }
+      82% { transform: scaleX(0.86) scaleY(0.52); opacity: 0.6; }
+    }
+  `
+  document.head.appendChild(style)
+}
 
 export function normalizeAgentAvatarIndex(value: unknown, fallbackIndex = 0): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -36,6 +106,17 @@ export function resolveAgentAvatarIndex(member: unknown, index: number): number 
     ? (member as Record<string, unknown>)
     : null
   return normalizeAgentAvatarIndex(row?.avatar, index)
+}
+
+export function resolveCustomAgentAvatarUrl(member: unknown): string | null {
+  const row = member && typeof member === 'object' && !Array.isArray(member)
+    ? (member as Record<string, unknown>)
+    : null
+  const avatarUrl = typeof row?.avatar_url === 'string' ? row.avatar_url.trim() : ''
+  if (!avatarUrl) return null
+  const avatarMode = typeof row?.avatar_mode === 'string' ? row.avatar_mode.trim() : ''
+  if (avatarMode && avatarMode !== 'portrait') return null
+  return avatarUrl
 }
 
 export function darkenHexColor(color: string, amount = 0.2): string {
@@ -297,6 +378,352 @@ export function AgentAvatar({
       {bodyParts}
       {details}
     </svg>
+  )
+}
+
+export type AgentAvatarActivityState =
+  | OrchestratorState
+  | 'active'
+  | 'spawning'
+  | 'paused'
+  | 'error'
+  | 'offline'
+
+function normalizeAgentAvatarActivityState(
+  state?: AgentAvatarActivityState,
+): OrchestratorState | 'error' {
+  switch (state) {
+    case 'active':
+      return 'responding'
+    case 'spawning':
+      return 'thinking'
+    case 'paused':
+      return 'reading'
+    case 'error':
+      return 'error'
+    case 'offline':
+      return 'idle'
+    default:
+      return state ?? 'idle'
+  }
+}
+
+function getAvatarAnimationStyle(
+  state: OrchestratorState | 'error',
+): CSSProperties {
+  switch (state) {
+    case 'thinking':
+      return { animation: 'wm-avatar-think 1.9s ease-in-out infinite' }
+    case 'responding':
+    case 'tool-use':
+    case 'orchestrating':
+      return { animation: 'wm-avatar-speak 0.72s ease-in-out infinite' }
+    case 'reading':
+      return { animation: 'wm-avatar-listen 1.4s ease-in-out infinite' }
+    case 'error':
+      return { animation: 'wm-avatar-error 0.52s ease-in-out 3' }
+    case 'idle':
+    default:
+      return { animation: 'wm-avatar-breathe 3.2s ease-in-out infinite' }
+  }
+}
+
+function getAvatarRingStyle(
+  color: string,
+  state: OrchestratorState | 'error',
+): CSSProperties {
+  const soft = `${color}33`
+  const hard = `${color}66`
+  switch (state) {
+    case 'thinking':
+      return { boxShadow: `0 0 0 2px ${soft}, 0 0 22px ${hard}`, animation: 'wm-avatar-ring-think 2s linear infinite' }
+    case 'responding':
+    case 'tool-use':
+    case 'orchestrating':
+      return { boxShadow: `0 0 0 2px ${soft}, 0 0 26px ${hard}`, animation: 'wm-avatar-ring-speak 1s ease-in-out infinite' }
+    case 'reading':
+      return { boxShadow: `0 0 0 2px ${soft}, 0 0 16px ${soft}` }
+    case 'error':
+      return { boxShadow: '0 0 0 2px rgba(239,68,68,0.28), 0 0 18px rgba(239,68,68,0.42)' }
+    case 'idle':
+    default:
+      return { boxShadow: `0 0 0 1px ${soft}, 0 0 12px ${soft}` }
+  }
+}
+
+function getAvatarOverlay(state: OrchestratorState | 'error'): string | null {
+  switch (state) {
+    case 'thinking':
+      return 'Thinking'
+    case 'responding':
+      return 'Speaking'
+    case 'tool-use':
+      return 'Tools'
+    case 'orchestrating':
+      return 'Directing'
+    case 'reading':
+      return 'Listening'
+    case 'error':
+      return 'Error'
+    default:
+      return null
+  }
+}
+
+function getAvatarStatusDotColor(state: OrchestratorState | 'error'): string {
+  switch (state) {
+    case 'thinking':
+      return '#f59e0b'
+    case 'responding':
+    case 'tool-use':
+    case 'orchestrating':
+      return '#10b981'
+    case 'reading':
+      return '#3b82f6'
+    case 'error':
+      return '#ef4444'
+    default:
+      return '#94a3b8'
+  }
+}
+
+export interface AgentAvatarDisplayProps {
+  member?: unknown
+  fallbackIndex: number
+  color: string
+  size?: number
+  className?: string
+  alt?: string
+  activityState?: AgentAvatarActivityState
+  animate?: boolean
+}
+
+export function AgentAvatarDisplay({
+  member,
+  fallbackIndex,
+  color,
+  size = 40,
+  className,
+  alt = 'Agent avatar',
+  activityState,
+  animate = false,
+}: AgentAvatarDisplayProps) {
+  useEffect(() => {
+    if (animate) ensureLiveAgentAvatarStyles()
+  }, [animate])
+
+  const imageUrl = resolveCustomAgentAvatarUrl(member)
+  const state = normalizeAgentAvatarActivityState(activityState)
+  const outline = darkenHexColor(color, 0.3)
+  const radius = Math.max(10, Math.round(size * 0.32))
+  const shellStyle = animate ? getAvatarAnimationStyle(state) : undefined
+  const ringStyle = animate ? getAvatarRingStyle(color, state) : undefined
+  const overlayLabel = animate ? getAvatarOverlay(state) : null
+  const dotColor = getAvatarStatusDotColor(state)
+  const shouldSpeak =
+    state === 'responding' || state === 'tool-use' || state === 'orchestrating'
+  const portraitMotionStyle = animate
+    ? ({
+        animation: `wm-avatar-drift ${state === 'reading' ? '3.8s' : '5.4s'} ease-in-out infinite`,
+        transformOrigin: '50% 42%',
+      } satisfies CSSProperties)
+    : undefined
+  const blinkStyle = animate
+    ? ({
+        animation: `wm-avatar-blink ${state === 'thinking' ? '5.6s' : '7.4s'} ease-in-out infinite`,
+      } satisfies CSSProperties)
+    : undefined
+  const mouthStyle = animate
+    ? ({
+        animation: shouldSpeak
+          ? 'wm-avatar-mouth-speak 0.72s ease-in-out infinite'
+          : 'wm-avatar-mouth-idle 3.2s ease-in-out infinite',
+        transformOrigin: '50% 50%',
+      } satisfies CSSProperties)
+    : undefined
+
+  if (imageUrl) {
+    return (
+      <span
+        className={className}
+        style={{
+          position: 'relative',
+          display: 'inline-flex',
+          width: size,
+          height: size,
+          borderRadius: radius,
+          ...ringStyle,
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            width: size,
+            height: size,
+            borderRadius: radius,
+            overflow: 'hidden',
+            background: 'rgba(255,255,255,0.94)',
+            boxShadow: `inset 0 0 0 1px ${outline}`,
+            ...shellStyle,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              position: 'relative',
+              display: 'block',
+              width: '100%',
+              height: '100%',
+              ...portraitMotionStyle,
+            }}
+          >
+            <img
+              src={imageUrl}
+              alt={alt}
+              width={size}
+              height={size}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                objectPosition: 'center 24%',
+                display: 'block',
+                filter: state === 'error' ? 'saturate(0.9)' : undefined,
+              }}
+            />
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: '27%',
+                top: '38%',
+                width: '46%',
+                height: '8%',
+                display: animate ? 'block' : 'none',
+                ...blinkStyle,
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  width: '34%',
+                  height: '100%',
+                  borderRadius: 999,
+                  background: 'rgba(15,23,42,0.78)',
+                  boxShadow: '0 0 0 1px rgba(255,255,255,0.18)',
+                }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 0,
+                  width: '34%',
+                  height: '100%',
+                  borderRadius: 999,
+                  background: 'rgba(15,23,42,0.78)',
+                  boxShadow: '0 0 0 1px rgba(255,255,255,0.18)',
+                }}
+              />
+            </span>
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: shouldSpeak ? '69.5%' : '71%',
+                width: shouldSpeak ? '18%' : '14%',
+                height: shouldSpeak ? '9%' : '5%',
+                marginLeft: shouldSpeak ? '-9%' : '-7%',
+                borderRadius: 999,
+                background: shouldSpeak ? 'rgba(127,29,29,0.68)' : 'rgba(71,85,105,0.46)',
+                boxShadow: shouldSpeak
+                  ? '0 0 18px rgba(248,113,113,0.22)'
+                  : '0 0 10px rgba(148,163,184,0.14)',
+                ...mouthStyle,
+              }}
+            />
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background:
+                  state === 'thinking'
+                    ? 'linear-gradient(135deg, rgba(245,158,11,0.08), transparent 45%, rgba(245,158,11,0.12))'
+                    : shouldSpeak
+                      ? 'linear-gradient(180deg, transparent 55%, rgba(16,185,129,0.08) 100%)'
+                      : state === 'reading'
+                        ? 'linear-gradient(135deg, rgba(59,130,246,0.08), transparent 42%, rgba(59,130,246,0.12))'
+                        : 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(15,23,42,0.04))',
+                pointerEvents: 'none',
+              }}
+            />
+          </span>
+        </span>
+        {animate ? (
+          <>
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                right: Math.max(2, Math.round(size * 0.05)),
+                top: Math.max(2, Math.round(size * 0.05)),
+                width: Math.max(6, Math.round(size * 0.16)),
+                height: Math.max(6, Math.round(size * 0.16)),
+                borderRadius: 999,
+                background: dotColor,
+                boxShadow: '0 0 0 2px rgba(255,255,255,0.92)',
+              }}
+            />
+            {overlayLabel ? (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  bottom: -Math.max(10, Math.round(size * 0.22)),
+                  transform: 'translateX(-50%)',
+                  borderRadius: 999,
+                  background: 'rgba(15,23,42,0.78)',
+                  color: 'white',
+                  fontSize: Math.max(8, Math.round(size * 0.16)),
+                  lineHeight: 1,
+                  padding: `${Math.max(2, Math.round(size * 0.07))}px ${Math.max(5, Math.round(size * 0.12))}px`,
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '0.01em',
+                }}
+              >
+                {overlayLabel}
+              </span>
+            ) : null}
+          </>
+        ) : null}
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className={className}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        width: size,
+        height: size,
+        borderRadius: radius,
+        ...ringStyle,
+      }}
+    >
+      <AgentAvatar
+        index={resolveAgentAvatarIndex(member, fallbackIndex)}
+        color={color}
+        size={size}
+        className={className}
+      />
+    </span>
   )
 }
 

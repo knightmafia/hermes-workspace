@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { AgentWorkingRow, AgentWorkingStatus } from './agents-working-panel'
 import type { ModelPresetId } from './team-panel'
-import { AGENT_ACCENT_COLORS, AgentAvatar } from './agent-avatar'
+import { AGENT_ACCENT_COLORS, AgentAvatarDisplay, type AgentAvatarActivityState } from './agent-avatar'
 
 export type RemoteSession = {
   sessionKey: string
@@ -25,6 +25,7 @@ export type OfficeViewProps = {
   processType: 'sequential' | 'hierarchical' | 'parallel'
   companyName?: string
   agentTasks?: Record<string, string>
+  agentDirectoryById?: Map<string, unknown>
   remoteSessions?: RemoteSession[]
   onViewRemoteOutput?: (sessionKey: string, label: string) => void
   /** Fixed pixel height for the office container (compact mode) */
@@ -210,6 +211,25 @@ function getAgentStatusGlowColor(status: AgentWorkingStatus): string {
       return '#ef4444'
     default:
       return '#94a3b8'
+  }
+}
+
+function getAvatarActivityState(status: AgentWorkingStatus): AgentAvatarActivityState {
+  switch (status) {
+    case 'active':
+      return 'responding'
+    case 'spawning':
+      return 'thinking'
+    case 'paused':
+      return 'reading'
+    case 'error':
+      return 'error'
+    case 'none':
+      return 'offline'
+    case 'ready':
+    case 'idle':
+    default:
+      return 'idle'
   }
 }
 
@@ -426,6 +446,7 @@ export function OfficeView({
   activeTemplateName: _activeTemplateName,
   companyName = 'Mission Control',
   agentTasks = {},
+  agentDirectoryById,
   remoteSessions = [],
   onViewRemoteOutput,
   containerHeight,
@@ -581,6 +602,8 @@ export function OfficeView({
             const accent = AGENT_ACCENT_COLORS[index % AGENT_ACCENT_COLORS.length]
             const statusMeta = getAgentStatusMeta(agent.status)
             const emoji = getAgentEmoji(agent)
+            const member = agentDirectoryById?.get(agent.id)
+            const avatarActivityState = getAvatarActivityState(agent.status)
             return (
               <button
                 key={`${agent.id}-mobile`}
@@ -592,7 +615,15 @@ export function OfficeView({
                   {emoji ? (
                     <span className="text-base leading-none" aria-hidden>{emoji}</span>
                   ) : (
-                    <AgentAvatar index={index % 10} color={accent.hex} size={22} />
+                    <AgentAvatarDisplay
+                      member={member}
+                      fallbackIndex={index}
+                      color={accent.hex}
+                      size={22}
+                      alt={`${agent.name} avatar`}
+                      activityState={avatarActivityState}
+                      animate
+                    />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -760,6 +791,8 @@ export function OfficeView({
           const accent = AGENT_ACCENT_COLORS[index % AGENT_ACCENT_COLORS.length]
           const pos = agentPositions[index]
           const emoji = getAgentEmoji(agent)
+          const member = agentDirectoryById?.get(agent.id)
+          const avatarActivityState = getAvatarActivityState(agent.status)
           const isSelected = agent.id === selectedOutputAgentId
           const isActive = agent.status === 'active'
           const isIdle = agent.status === 'idle' || agent.status === 'ready'
@@ -812,10 +845,14 @@ export function OfficeView({
                       {emoji}
                     </span>
                   ) : (
-                    <AgentAvatar
-                      index={index % 10}
+                    <AgentAvatarDisplay
+                      member={member}
+                      fallbackIndex={index}
                       color={accent.hex}
                       size={isActive ? 44 : 38}
+                      alt={`${agent.name} avatar`}
+                      activityState={avatarActivityState}
+                      animate
                     />
                   )}
                 </div>
